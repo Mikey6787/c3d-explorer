@@ -1,0 +1,5 @@
+moveck_bridge_btk>=2025.3.2
+PySide6>=6.5.0
+pyqtgraph>=0.13.0
+pyopengl>=3.1.5
+numpy>=1.24.0

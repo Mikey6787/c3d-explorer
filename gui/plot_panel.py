@@ -1,0 +1,418 @@
+"""Synchronized 2D plotting panel for analog channels, ground reaction forces, and events."""
+
+from typing import Dict, List, Optional
+import numpy as np
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QSplitter, QListWidget,
+    QListWidgetItem, QLabel, QPushButton, QComboBox, QCheckBox,
+    QLineEdit, QFrame, QSizePolicy
+)
+import pyqtgraph as pg
+
+from core.data_models import C3DTrial, C3DEvent
+
+
+# Distinct color cycle for multi-curve plotting
+PLOT_COLORS = [
+    "#00E5FF",  # Cyan
+    "#FF5252",  # Vivid Red
+    "#69F0AE",  # Mint Green
+    "#FFD740",  # Amber Yellow
+    "#E040FB",  # Purple
+    "#40C4FF",  # Sky Blue
+    "#FF6E40",  # Coral Orange
+    "#EEFF41",  # Lime
+    "#B388FF",  # Violet
+    "#FFAB40"   # Tangerine
+]
+
+
+class PlotPanel(QWidget):
+    """
+    High-performance 2D plotting panel for:
+    - Ground reaction forces (Fx, Fy, Fz)
+    - Ground reaction moments (Mx, My, Mz)
+    - Analog EMG / transducer channels
+    - Synchronized playback time cursor
+    - Event indicators (vertical dashed lines)
+    """
+    timeCursorMoved = Signal(float)  # Emitted when user drags cursor on plot
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.trial: Optional[C3DTrial] = None
+        self.current_time: float = 0.0
+        self.active_curves: Dict[str, pg.PlotDataItem] = {}
+        self.event_lines: List[pg.InfiniteLine] = []
+        self._color_counter: int = 0
+
+        self._setup_ui()
+
+    def _setup_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(6, 6, 6, 6)
+        main_layout.setSpacing(6)
+
+        # Top Control Bar
+        ctrl_bar = QHBoxLayout()
+        ctrl_bar.setSpacing(8)
+
+        lbl_title = QLabel("Time-Series Signals:")
+        lbl_title.setStyleSheet("font-weight: 600; color: #ECEFF4;")
+        ctrl_bar.addWidget(lbl_title)
+
+        # Quick preset buttons
+        btn_forces = QPushButton("Forces (Fz / F)")
+        btn_forces.clicked.connect(self._preset_forces)
+        ctrl_bar.addWidget(btn_forces)
+
+        btn_moments = QPushButton("Moments (M)")
+        btn_moments.clicked.connect(self._preset_moments)
+        ctrl_bar.addWidget(btn_moments)
+
+        btn_analogs = QPushButton("Analog Channels")
+        btn_analogs.clicked.connect(self._preset_analogs)
+        ctrl_bar.addWidget(btn_analogs)
+
+        btn_clear = QPushButton("Clear All")
+        btn_clear.clicked.connect(self._clear_selected_channels)
+        ctrl_bar.addWidget(btn_clear)
+
+        ctrl_bar.addStretch()
+
+        btn_autorange = QPushButton("Fit / Auto Range")
+        btn_autorange.clicked.connect(self.auto_range)
+        ctrl_bar.addWidget(btn_autorange)
+
+        main_layout.addLayout(ctrl_bar)
+
+        # Splitter: Left channel selector | Right PyQtGraph PlotWidget
+        splitter = QSplitter(Qt.Horizontal, self)
+        splitter.setHandleWidth(4)
+
+        # --- Left Channel Selector Widget ---
+        selector_widget = QWidget()
+        sel_layout = QVBoxLayout(selector_widget)
+        sel_layout.setContentsMargins(0, 0, 0, 0)
+        sel_layout.setSpacing(4)
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Filter channels...")
+        self.search_box.textChanged.connect(self._filter_channel_list)
+        sel_layout.addWidget(self.search_box)
+
+        self.channel_list = QListWidget()
+        self.channel_list.itemChanged.connect(self._on_channel_item_changed)
+        sel_layout.addWidget(self.channel_list)
+
+        selector_widget.setMaximumWidth(260)
+        selector_widget.setMinimumWidth(180)
+        splitter.addWidget(selector_widget)
+
+        # --- Right PyQtGraph Plot Widget ---
+        pg.setConfigOptions(antialias=False)
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground("#151720")
+        self.plot_widget.showGrid(x=True, y=True, alpha=0.25)
+        self.plot_widget.setLabel("bottom", "Time", units="s")
+        self.plot_widget.setLabel("left", "Amplitude / Force", units="N / V")
+        self.plot_widget.addLegend(offset=(10, 10))
+
+        # Vertical Time Scrubber Cursor (clean vertical line without floating label)
+        self.time_cursor = pg.InfiniteLine(
+            pos=0.0,
+            angle=90,
+            movable=True,
+            pen=pg.mkPen(color="#00ADB5", width=2, style=Qt.SolidLine)
+        )
+        self.time_cursor.sigPositionChanged.connect(self._on_cursor_dragged)
+        self.plot_widget.addItem(self.time_cursor)
+
+        splitter.addWidget(self.plot_widget)
+        splitter.setSizes([200, 800])
+        main_layout.addWidget(splitter)
+
+    # ---------------------------------------------------------
+    # Data Loading
+    # ---------------------------------------------------------
+    def load_trial(self, trial: C3DTrial):
+        """Populate available channel list and draw event lines."""
+        self.trial = trial
+        self.current_time = 0.0
+        self.active_curves.clear()
+        self.plot_widget.clear()
+
+        # Re-add time cursor line
+        self.plot_widget.addItem(self.time_cursor)
+        self.time_cursor.setValue(0.0)
+
+        # Draw vertical lines for events
+        self._build_event_lines()
+
+        # Populate Channel List
+        self.channel_list.blockSignals(True)
+        self.channel_list.clear()
+
+        # 1. Force plates channels (Forces & Moments)
+        for fp in self.trial.force_platforms:
+            if fp.forces is not None:
+                for axis_idx, axis_name in enumerate(["Fx", "Fy", "Fz"]):
+                    item = QListWidgetItem(f"FP{fp.id}_{axis_name}")
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Unchecked)
+                    item.setData(Qt.UserRole, ("force", fp.id - 1, axis_idx))
+                    self.channel_list.addItem(item)
+
+            if fp.moments is not None:
+                for axis_idx, axis_name in enumerate(["Mx", "My", "Mz"]):
+                    item = QListWidgetItem(f"FP{fp.id}_{axis_name}")
+                    item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Unchecked)
+                    item.setData(Qt.UserRole, ("moment", fp.id - 1, axis_idx))
+                    self.channel_list.addItem(item)
+
+        # 2. General Analog Channels
+        for ch_name in sorted(list(self.trial.analogs.keys())):
+            item = QListWidgetItem(ch_name)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, ("analog", ch_name))
+            self.channel_list.addItem(item)
+
+        self.channel_list.blockSignals(False)
+
+        # By default, check vertical force (Fz) of available plates
+        self._preset_forces()
+
+    def _build_event_lines(self):
+        """Draw vertical dashed lines at event timestamps."""
+        for line in self.event_lines:
+            self.plot_widget.removeItem(line)
+        self.event_lines.clear()
+        if not self.trial:
+            return
+
+        for ev in self.trial.events:
+            line = pg.InfiniteLine(
+                pos=ev.time,
+                angle=90,
+                movable=False,
+                pen=pg.mkPen(color=ev.icon_color, width=1.5, style=Qt.DashLine)
+            )
+            self.plot_widget.addItem(line)
+            self.event_lines.append(line)
+
+    def reload_events(self):
+        """Rebuild event vertical marker lines on the plot."""
+        self._build_event_lines()
+
+    def _filter_channel_list(self, text: str):
+        text_lower = text.strip().lower()
+        for i in range(self.channel_list.count()):
+            item = self.channel_list.item(i)
+            item.setHidden(text_lower not in item.text().lower())
+
+    def _preset_forces(self):
+        """Quick check Fz (and Fx/Fy) across all force plates."""
+        self.channel_list.blockSignals(True)
+        for i in range(self.channel_list.count()):
+            item = self.channel_list.item(i)
+            txt = item.text()
+            if "Fz" in txt or "_F" in txt:
+                item.setCheckState(Qt.Checked)
+            else:
+                item.setCheckState(Qt.Unchecked)
+        self.channel_list.blockSignals(False)
+        self._replot_active_channels()
+
+    def _preset_moments(self):
+        """Quick check moments across all force plates."""
+        self.channel_list.blockSignals(True)
+        for i in range(self.channel_list.count()):
+            item = self.channel_list.item(i)
+            item.setCheckState(Qt.Checked if "_M" in item.text() else Qt.Unchecked)
+        self.channel_list.blockSignals(False)
+        self._replot_active_channels()
+
+    def _preset_analogs(self):
+        """Quick check first 6 analog channels."""
+        self.channel_list.blockSignals(True)
+        analog_checked = 0
+        for i in range(self.channel_list.count()):
+            item = self.channel_list.item(i)
+            role = item.data(Qt.UserRole)
+            if role and role[0] == "analog" and analog_checked < 6:
+                item.setCheckState(Qt.Checked)
+                analog_checked += 1
+            else:
+                item.setCheckState(Qt.Unchecked)
+        self.channel_list.blockSignals(False)
+        self._replot_active_channels()
+
+    def _clear_selected_channels(self):
+        self.channel_list.blockSignals(True)
+        for i in range(self.channel_list.count()):
+            self.channel_list.item(i).setCheckState(Qt.Unchecked)
+        self.channel_list.blockSignals(False)
+        self._replot_active_channels()
+
+    def _toggle_downsampling(self, enabled: bool):
+        self.set_downsampling(enabled)
+
+    def set_downsampling(self, enabled: bool):
+        plot_item = self.plot_widget.getPlotItem()
+        if enabled:
+            plot_item.setDownsampling(ds=True, auto=True, mode='peak')
+            plot_item.setClipToView(True)
+        else:
+            plot_item.setDownsampling(ds=False, auto=False)
+            plot_item.setClipToView(False)
+        if hasattr(self, 'chk_fast_render') and self.chk_fast_render.isChecked() != enabled:
+            self.chk_fast_render.blockSignals(True)
+            self.chk_fast_render.setChecked(enabled)
+            self.chk_fast_render.blockSignals(False)
+        self.plot_widget.replot()
+
+    def set_antialias(self, enabled: bool):
+        pg.setConfigOptions(antialias=enabled)
+        self.plot_widget.replot()
+
+    def _on_channel_item_changed(self, item: QListWidgetItem):
+        """Differentially add or remove only the toggled channel curve for instant responsiveness."""
+        if not self.trial:
+            return
+        ch_key = item.text()
+        if item.checkState() == Qt.Checked:
+            if ch_key not in self.active_curves:
+                self._add_single_channel_curve(item)
+                self.auto_range()
+        else:
+            if ch_key in self.active_curves:
+                curve = self.active_curves.pop(ch_key)
+                self.plot_widget.removeItem(curve)
+
+    def _add_single_channel_curve(self, item: QListWidgetItem):
+        ch_key = item.text()
+        role_data = item.data(Qt.UserRole)
+        if not role_data:
+            return
+
+        y_data = None
+        time_vec = None
+        kind = role_data[0]
+
+        if kind == "force":
+            fp_idx, axis_idx = role_data[1], role_data[2]
+            if fp_idx < len(self.trial.force_platforms):
+                fp = self.trial.force_platforms[fp_idx]
+                if fp.forces is not None:
+                    y_data = fp.forces[:, axis_idx]
+                    rate = self.trial.analog_rate if self.trial.analog_rate > 0 else 1000.0
+                    time_vec = np.arange(len(y_data), dtype=np.float32) / rate
+
+        elif kind == "moment":
+            fp_idx, axis_idx = role_data[1], role_data[2]
+            if fp_idx < len(self.trial.force_platforms):
+                fp = self.trial.force_platforms[fp_idx]
+                if fp.moments is not None:
+                    y_data = fp.moments[:, axis_idx]
+                    rate = self.trial.analog_rate if self.trial.analog_rate > 0 else 1000.0
+                    time_vec = np.arange(len(y_data), dtype=np.float32) / rate
+
+        elif kind == "analog":
+            ch_name = role_data[1]
+            if ch_name in self.trial.analogs:
+                y_data = self.trial.analogs[ch_name]
+                rate = self.trial.analog_rate if self.trial.analog_rate > 0 else 1000.0
+                time_vec = np.arange(len(y_data), dtype=np.float32) / rate
+
+        elif kind == "custom":
+            y_data = role_data[1]
+            rate = self.trial.point_rate if self.trial and self.trial.point_rate > 0 else 100.0
+            time_vec = np.arange(len(y_data), dtype=np.float32) / rate
+
+        if y_data is not None and time_vec is not None:
+            col = PLOT_COLORS[self._color_counter % len(PLOT_COLORS)]
+            self._color_counter += 1
+            curve = self.plot_widget.plot(
+                time_vec,
+                y_data,
+                pen=pg.mkPen(color=col, width=1.8),
+                name=ch_key
+            )
+            self.active_curves[ch_key] = curve
+
+    def _replot_active_channels(self):
+        """Refresh curves according to checked channels in channel_list."""
+        if not self.trial:
+            return
+
+        # Remove existing curves
+        for curve in self.active_curves.values():
+            self.plot_widget.removeItem(curve)
+        self.active_curves.clear()
+
+        for i in range(self.channel_list.count()):
+            item = self.channel_list.item(i)
+            if item.checkState() == Qt.Checked:
+                self._add_single_channel_curve(item)
+
+        self.auto_range()
+
+    def add_custom_curve(self, label: str, y_data: np.ndarray):
+        """Add a custom signal (e.g. measured distance or angle) and plot it."""
+        self.channel_list.blockSignals(True)
+        found = False
+        for i in range(self.channel_list.count()):
+            item = self.channel_list.item(i)
+            if item.text() == label:
+                item.setData(Qt.UserRole, ("custom", y_data))
+                item.setCheckState(Qt.Checked)
+                found = True
+                break
+
+        if not found:
+            item = QListWidgetItem(label)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            item.setCheckState(Qt.Checked)
+            item.setData(Qt.UserRole, ("custom", y_data))
+            self.channel_list.insertItem(0, item)
+
+        self.channel_list.blockSignals(False)
+        self._replot_active_channels()
+
+    # ---------------------------------------------------------
+    # Cursor Synchronization
+    # ---------------------------------------------------------
+    def set_time(self, time_s: float):
+        """Update synchronized vertical time cursor without emitting signals."""
+        self.current_time = time_s
+        if self.time_cursor is not None:
+            self.time_cursor.blockSignals(True)
+            self.time_cursor.setValue(time_s)
+            self.time_cursor.blockSignals(False)
+
+    def _on_cursor_dragged(self):
+        if self.time_cursor is not None:
+            new_time = float(self.time_cursor.value())
+            self.timeCursorMoved.emit(new_time)
+
+    def auto_range(self):
+        """Fit plot view to active curves."""
+        self.plot_widget.autoRange()
+
+    def apply_theme(self, theme_dict: dict):
+        """Update 2D plot background and axis pens to match theme."""
+        bg = theme_dict.get("plot_bg", "#151720")
+        axis_col = theme_dict.get("plot_axis_color", "#ECEFF4")
+        accent = theme_dict.get("accent", "#00ADB5")
+        self.plot_widget.setBackground(bg)
+        try:
+            self.plot_widget.getPlotItem().getAxis('bottom').setTextPen(axis_col)
+            self.plot_widget.getPlotItem().getAxis('left').setTextPen(axis_col)
+            if self.time_cursor is not None:
+                self.time_cursor.setPen(pg.mkPen(color=accent, width=2, style=Qt.SolidLine))
+        except Exception:
+            pass
