@@ -155,24 +155,18 @@ class EventsBatchCommand(QUndoCommand):
         super().__init__("Event Manager Changes")
         self.mw = main_window
         self.trial = trial
-        self.old_events = list(old_events)
-        self.new_events = list(new_events)
+        self.old_events = [e.clone() for e in old_events]
+        self.new_events = [e.clone() for e in new_events]
 
     def redo(self):
         if self.trial:
-            self.trial.events = [
-                C3DEvent(e.time, e.frame, e.name, e.description, e.icon_color, getattr(e, 'subject', ''), getattr(e, 'context', ''))
-                for e in self.new_events
-            ]
+            self.trial.events = [e.clone() for e in self.new_events]
             self.trial.events.sort(key=lambda e: e.time)
         self.mw._refresh_event_views()
 
     def undo(self):
         if self.trial:
-            self.trial.events = [
-                C3DEvent(e.time, e.frame, e.name, e.description, e.icon_color, getattr(e, 'subject', ''), getattr(e, 'context', ''))
-                for e in self.old_events
-            ]
+            self.trial.events = [e.clone() for e in self.old_events]
             self.trial.events.sort(key=lambda e: e.time)
         self.mw._refresh_event_views()
         self.mw.status.showMessage("Reverted Event Manager changes", 3000)

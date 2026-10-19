@@ -109,9 +109,9 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(central_container)
 
-        # --- Left Dock: Markers Panel (Markers, Force Plates, Events) ---
-        self.dock_side = QDockWidget("Markers", self)
-        self.dock_side.setObjectName("DockMarkers")
+        # --- Left Dock: Data Explorer Panel (Markers, Force Plates, Events) ---
+        self.dock_side = QDockWidget("Data Explorer", self)
+        self.dock_side.setObjectName("DockDataExplorer")
         self.dock_side.setWidget(self.side_panel)
         self.dock_side.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
         )
         self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_plot)
+        self.dock_plot.visibilityChanged.connect(self._on_analog_dock_visibility_changed)
         self.dock_plot.hide()  # By default, Analog panel is deactivated/hidden on launch
 
     def _setup_playback_bar(self):
@@ -181,15 +182,30 @@ class MainWindow(QMainWindow):
         self.btn_loop.clicked.connect(self._on_loop_toggled)
         layout.addWidget(self.btn_loop)
 
+        # Time / Frame Mode Toggle (Positioned next to Loop: ON, default: Frame)
+        self.btn_timeline_unit = QPushButton("Frame")
+        self.btn_timeline_unit.setToolTip("Switch timeline ruler between Frame index and Time (seconds) [Shortcut: U]")
+        self.btn_timeline_unit.setCursor(Qt.PointingHandCursor)
+        self.btn_timeline_unit.setFixedHeight(32)
+        self.btn_timeline_unit.setStyleSheet("font-weight: 600; padding: 2px 14px;")
+        self.btn_timeline_unit.clicked.connect(self.timeline.toggle_display_mode)
+        layout.addWidget(self.btn_timeline_unit)
+
         layout.addSpacing(16)
 
-        # Frame and Time Status Indicators
-        self.lbl_frame_info = QLabel("Frame: 0 / 0")
-        self.lbl_frame_info.setStyleSheet("font-weight: 600; color: #ECEFF4;")
+        # Frame and Time Status Indicators (Frame active by default)
+        self.lbl_frame_info = QLabel("Frame: 1 / 1")
+        self.lbl_frame_info.setCursor(Qt.PointingHandCursor)
+        self.lbl_frame_info.setToolTip("Click to display Timeline ruler in Frame index")
+        self.lbl_frame_info.mousePressEvent = lambda e: self.timeline.set_display_mode("frame")
+        self.lbl_frame_info.setStyleSheet("color: #00ADB5; font-weight: 700;")
         layout.addWidget(self.lbl_frame_info)
 
         self.lbl_time_info = QLabel("Time: 0.000 s / 0.000 s")
-        self.lbl_time_info.setStyleSheet("color: #00ADB5; font-weight: 600;")
+        self.lbl_time_info.setCursor(Qt.PointingHandCursor)
+        self.lbl_time_info.setToolTip("Click to display Timeline ruler in Time (seconds)")
+        self.lbl_time_info.mousePressEvent = lambda e: self.timeline.set_display_mode("time")
+        self.lbl_time_info.setStyleSheet("color: #8C96AB; font-weight: 500;")
         layout.addWidget(self.lbl_time_info)
 
         layout.addStretch()
@@ -397,7 +413,7 @@ class MainWindow(QMainWindow):
         panels_menu = view_menu.addMenu("&Panels")
 
         act_toggle_side = self.dock_side.toggleViewAction()
-        act_toggle_side.setText("Markers")
+        act_toggle_side.setText("Data Explorer")
         panels_menu.addAction(act_toggle_side)
 
         act_toggle_plot = self.dock_plot.toggleViewAction()
@@ -512,6 +528,7 @@ class MainWindow(QMainWindow):
         self.timeline.addEventRequested.connect(self.add_event_dialog)
         self.timeline.editEventRequested.connect(self.edit_event_dialog)
         self.timeline.deleteEventRequested.connect(self.delete_event)
+        self.timeline.displayModeChanged.connect(self._on_timeline_mode_changed)
 
         # 2D Plot time cursor dragged -> Playback frame
         self.plot_panel.timeCursorMoved.connect(self._on_plot_cursor_moved)
@@ -549,7 +566,7 @@ class MainWindow(QMainWindow):
         if is_trimmed:
             cnt = end_f - start_f + 1
             sec = cnt / self.trial.point_rate if self.trial.point_rate > 0 else 0.0
-            self.status.showMessage(f"Cut / ROI region: Frames {start_f} to {end_f} ({cnt} frames, {sec:.3f}s) — Export will include this range only.", 3000)
+            self.status.showMessage(f"Cut / ROI region: Frames {start_f + 1} to {end_f + 1} ({cnt} frames, {sec:.3f}s) — Export will include this range only.", 3000)
         else:
             self.status.showMessage("Cut / ROI region reset to full trial", 2000)
 
@@ -565,12 +582,17 @@ class MainWindow(QMainWindow):
                 win.set_trim_range(start_f, end_f)
 
         # Synchronize 2D PlotPanel
-        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
+        if hasattr(self, 'plot_panel'):
             self.plot_panel.set_trim_range(start_f, end_f)
 
         # Synchronize UniversalPlotterWindow
-        if self.plotter_window and (self.plotter_window.isVisible() or not self.plotter_window.isHidden()):
+        if self.plotter_window:
             self.plotter_window.set_trim_range(start_f, end_f)
+
+    def _on_analog_dock_visibility_changed(self, visible: bool):
+        if visible and hasattr(self, 'plot_panel') and self.trial:
+            self.plot_panel.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
+            self.plot_panel.set_frame(self.playback.current_frame)
 
     def _on_plot_roi_changed(self, start_f: int, end_f: int):
         """Synchronize timeline trim when ROI is dragged on a plot window or panel."""
@@ -593,7 +615,7 @@ class MainWindow(QMainWindow):
 
         # 3. Update 2D Plot Time Cursor
         cur_time = self.trial.frame_to_time(frame_idx)
-        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
+        if hasattr(self, 'plot_panel'):
             self.plot_panel.set_time(cur_time)
 
         # 4. Update Side Panel Live Readouts
@@ -613,7 +635,7 @@ class MainWindow(QMainWindow):
                 self.measurement_plot_windows.remove(m_win)
 
         # 6. Update Playback Toolbar Labels
-        self.lbl_frame_info.setText(f"Frame: {frame_idx} / {self.trial.point_frame_count - 1}")
+        self.lbl_frame_info.setText(f"Frame: {frame_idx + 1} / {self.trial.point_frame_count}")
         self.lbl_time_info.setText(f"Time: {cur_time:.3f} s / {self.trial.duration_seconds:.3f} s")
 
     def _on_playback_state_changed(self, is_playing: bool):
@@ -645,6 +667,33 @@ class MainWindow(QMainWindow):
         self.btn_loop.setText("Loop: ON" if is_loop else "Loop: OFF")
         self.playback.set_loop(is_loop)
         self._save_settings({"loop": is_loop})
+
+    def _on_timeline_mode_changed(self, mode: str):
+        """Update playback toolbar unit toggle button and highlight active format."""
+        if hasattr(self, 'btn_timeline_unit'):
+            self.btn_timeline_unit.setText("Frame" if mode == "frame" else "Time")
+        self._update_time_frame_labels_style()
+        self._save_settings({"timeline_display_mode": mode})
+
+    def _update_time_frame_labels_style(self):
+        """Highlight active format (Frame vs Time) with accent color and subtle mute for inactive."""
+        theme_dict = get_theme(self.current_theme_name)
+        is_dark = theme_dict.get("is_dark", True)
+        accent = theme_dict.get("accent", "#00ADB5" if is_dark else "#0284C7")
+        muted = "#8C96AB" if is_dark else "#6B7280"
+        mode = getattr(self.timeline, "display_mode", "frame")
+
+        if hasattr(self, 'lbl_frame_info'):
+            if mode == "frame":
+                self.lbl_frame_info.setStyleSheet(f"color: {accent}; font-weight: 700;")
+            else:
+                self.lbl_frame_info.setStyleSheet(f"color: {'#ECEFF4' if is_dark else '#2E3440'}; font-weight: 500;")
+
+        if hasattr(self, 'lbl_time_info'):
+            if mode == "time":
+                self.lbl_time_info.setStyleSheet(f"color: {accent}; font-weight: 700;")
+            else:
+                self.lbl_time_info.setStyleSheet(f"color: {muted}; font-weight: 500;")
 
     # ---------------------------------------------------------
     # Marker Tools & Measurements
@@ -803,6 +852,8 @@ class MainWindow(QMainWindow):
         else:
             if self.trial and self.plotter_window.trial != self.trial:
                 self.plotter_window.load_trial(self.trial)
+            elif self.trial:
+                self.plotter_window.reload_events()
         if hasattr(self, 'timeline'):
             self.plotter_window.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
         self.plotter_window.show()
@@ -887,6 +938,8 @@ class MainWindow(QMainWindow):
         self.timeline.set_trial_data(self.trial.point_frame_count, self.trial.point_rate, self.trial.events)
         self.timeline.set_current_frame(self.playback.current_frame)
         self.plot_panel.reload_events()
+        if self.plotter_window:
+            self.plotter_window.reload_events()
         self.side_panel._populate_events()
         self._update_status_stats()
 
@@ -1000,19 +1053,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Event Manager", "Please load a C3D trial first.")
             return
 
-        initial_events = [
-            C3DEvent(e.time, e.frame, e.name, e.description, e.icon_color, getattr(e, 'subject', ''), getattr(e, 'context', ''))
-            for e in self.trial.events
-        ]
+        initial_events = [e.clone() for e in self.trial.events]
         dlg = EventManagerDialog(self.trial, current_frame=self.playback.current_frame, parent=self)
         dlg.eventListChanged.connect(self._refresh_event_views)
         dlg.seekRequested.connect(self.playback.set_frame)
         dlg.exec()
         self._refresh_event_views()
-        new_events = [
-            C3DEvent(e.time, e.frame, e.name, e.description, e.icon_color, getattr(e, 'subject', ''), getattr(e, 'context', ''))
-            for e in self.trial.events
-        ]
+        new_events = [e.clone() for e in self.trial.events]
         if [(e.name, e.frame, round(e.time, 4)) for e in initial_events] != [(e.name, e.frame, round(e.time, 4)) for e in new_events]:
             cmd = EventsBatchCommand(self, self.trial, initial_events, new_events)
             self.undo_stack.push(cmd)
@@ -1064,6 +1111,7 @@ class MainWindow(QMainWindow):
 
             # Update 2D Plot Panel
             self.plot_panel.load_trial(trial)
+            self.plot_panel.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
 
             # Update Side Inspector Panel
             self.side_panel.load_trial(trial)
@@ -1073,7 +1121,7 @@ class MainWindow(QMainWindow):
                 self.plotter_window.load_trial(trial)
 
             # Update Toolbar & Status
-            self.lbl_rates.setText(f"Point: {trial.point_rate:.1f} Hz | Analog: {trial.analog_rate:.1f} Hz")
+            self.lbl_rates.setText(f"Point: {round(trial.point_rate):.0f} Hz | Analog: {round(trial.analog_rate):.0f} Hz")
             self.lbl_status_file.setText(f"Loaded: {file_path}")
             self.lbl_status_stats.setText(
                 f"Markers: {len(trial.markers)} | Analogs: {len(trial.analogs)} | "
@@ -1212,9 +1260,9 @@ class MainWindow(QMainWindow):
                     "=" * 60,
                     f"File Path: {self.trial.file_path}",
                     f"Point Frame Count: {self.trial.point_frame_count}",
-                    f"Point Frequency: {self.trial.point_rate} Hz",
+                    f"Point Frequency: {round(self.trial.point_rate):.0f} Hz",
                     f"Analog Frame Count: {self.trial.analog_frame_count}",
-                    f"Analog Frequency: {self.trial.analog_rate} Hz",
+                    f"Analog Frequency: {round(self.trial.analog_rate):.0f} Hz",
                     f"Duration: {self.trial.duration_seconds:.3f} s",
                     f"Marker Units: {self.trial.marker_units}",
                     "",
@@ -1264,13 +1312,9 @@ class MainWindow(QMainWindow):
         else:
             if getattr(self.viewer_3d, "marker_color", None) and self.viewer_3d.marker_color[:3] == (1.0, 1.0, 1.0):
                 self.side_panel.set_default_marker_color(QColor("#FFFFFF"))
-        if hasattr(self, 'lbl_frame_info'):
-            self.lbl_frame_info.setStyleSheet(f"font-weight: 600; color: {'#ECEFF4' if is_dark else '#2E3440'};")
-        accent = theme_dict.get("accent", "#00ADB5" if is_dark else "#0284C7")
-        if hasattr(self, 'lbl_time_info'):
-            self.lbl_time_info.setStyleSheet(f"color: {accent}; font-weight: 600;")
         if hasattr(self, 'lbl_rates'):
             self.lbl_rates.setStyleSheet(f"color: {'#8C96AB' if is_dark else '#6B7280'}; font-size: 11px;")
+        self._update_time_frame_labels_style()
         self._update_playback_icons()
         if hasattr(self, 'theme_actions') and theme_name in self.theme_actions:
             self.theme_actions[theme_name].setChecked(True)
@@ -1312,6 +1356,7 @@ class MainWindow(QMainWindow):
             "default_speed": getattr(self, '_default_speed', "1.0x (Real-time)"),
             "loop": self.playback.is_looping,
             "plot_antialias": antialias_val,
+            "timeline_display_mode": getattr(self.timeline, "display_mode", "frame"),
         }
 
     def open_settings_dialog(self, initial_tab: int = 0):
@@ -1391,6 +1436,10 @@ class MainWindow(QMainWindow):
                 self.plot_panel.set_antialias(aa)
             if self.plotter_window:
                 self.plotter_window.set_antialias(aa)
+        if "timeline_display_mode" in cfg and hasattr(self, 'timeline'):
+            self.timeline.set_display_mode(cfg["timeline_display_mode"])
+        elif hasattr(self, 'timeline'):
+            self.timeline.set_display_mode("frame")
 
         if save_to_disk:
             self._save_settings(cfg)

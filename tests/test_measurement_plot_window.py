@@ -76,21 +76,40 @@ win.show()
 # Test cursor update
 win.update_frame(80)
 assert win.current_frame == 80
-assert "Frame 80" in win.lbl_current_val.text()
+assert "Frame 81" in win.lbl_current_val.text()
 
-# Test time/frame mode switch
-win._on_axis_mode_changed(1)  # switch to frames
+# Initial mode is Frame by default
 assert win.x_axis_mode == "frame"
-win._on_axis_mode_changed(0)  # switch to time
-assert win.x_axis_mode == "time"
 
 # Test cursor dragged signal
 cursor_times = []
 win.timeCursorMoved.connect(lambda t: cursor_times.append(t))
-win.time_cursor.setValue(0.5)
+win.time_cursor.setValue(51.0)
 win._on_cursor_dragged()
 assert len(cursor_times) > 0
-assert abs(cursor_times[0] - 0.5) < 1e-4
+assert abs(cursor_times[0] - 50.0 / rate) < 1e-4
+
+# Test Fit ROI and Fit Full in Frame mode (default)
+win.set_trim_range(20, 80)
+win.fit_roi()
+vb_range_x = win.plot_widget.getViewBox().viewRange()[0]
+assert vb_range_x[0] <= 21 and vb_range_x[1] >= 81, "fit_roi should zoom to ROI range in frames"
+print("Verified Fit ROI zooms strictly to ROI bounds in Frame mode!")
+
+win.auto_range()
+vb_full_x = win.plot_widget.getViewBox().viewRange()[0]
+assert vb_full_x[0] <= 1.0 and vb_full_x[1] >= n_frames, "auto_range should zoom to full curve in frames"
+print("Verified Fit Full zooms to entire trial bounds in Frame mode!")
+
+# Test time/frame mode switch
+win._on_axis_mode_changed(0)  # switch to time
+assert win.x_axis_mode == "time"
+win.fit_roi()
+vb_range_t = win.plot_widget.getViewBox().viewRange()[0]
+assert vb_range_t[0] <= 20 / rate and vb_range_t[1] >= 80 / rate, "fit_roi should zoom to ROI range in time"
+
+win._on_axis_mode_changed(1)  # switch back to frames
+assert win.x_axis_mode == "frame"
 
 print("MeasurementPlotWindow verified completely!")
 

@@ -80,14 +80,14 @@ class EventEditDialog(QDialog):
         self.combo_context.currentTextChanged.connect(self._on_context_changed)
         form.addRow("<b>Context / Leg:</b>", self.combo_context)
 
-        # 3. Frame Number
+        # 3. Frame Number (1-based for the user)
         self.spin_frame = QSpinBox()
-        self.spin_frame.setRange(0, self.max_frame)
-        self.spin_frame.setValue(self.current_frame)
+        self.spin_frame.setRange(1, self.max_frame + 1)
+        self.spin_frame.setValue(self.current_frame + 1)
         self.spin_frame.valueChanged.connect(self._on_frame_changed)
         form.addRow("<b>Frame:</b>", self.spin_frame)
 
-        # 4. Time (seconds)
+        # 4. Time (seconds, starts from 0.0)
         self.spin_time = QDoubleSpinBox()
         self.spin_time.setRange(0.0, self.max_time)
         self.spin_time.setDecimals(4)
@@ -154,7 +154,7 @@ class EventEditDialog(QDialog):
             self.combo_context.setCurrentText(ev.context if ev.context else "General")
             if self.combo_context.lineEdit():
                 self.combo_context.lineEdit().setCursorPosition(0)
-            self.spin_frame.setValue(ev.frame)
+            self.spin_frame.setValue(ev.frame + 1)
             self.spin_time.setValue(ev.time)
             self.txt_subject.setText(getattr(ev, "subject", "") or "")
             self.txt_desc.setText(getattr(ev, "description", "") or "")
@@ -172,13 +172,13 @@ class EventEditDialog(QDialog):
 
     def _on_frame_changed(self, frame: int):
         self.spin_time.blockSignals(True)
-        self.spin_time.setValue(frame / self.point_rate)
+        self.spin_time.setValue(max(0.0, (frame - 1) / self.point_rate))
         self.spin_time.blockSignals(False)
 
     def _on_time_changed(self, t: float):
         self.spin_frame.blockSignals(True)
         f = int(round(t * self.point_rate))
-        self.spin_frame.setValue(max(0, min(self.max_frame, f)))
+        self.spin_frame.setValue(max(1, min(self.max_frame + 1, f + 1)))
         self.spin_frame.blockSignals(False)
 
     def _on_context_changed(self, ctx: str):
@@ -225,7 +225,7 @@ class EventEditDialog(QDialog):
         """Construct C3DEvent object from dialog inputs."""
         lbl = self.combo_name.currentText().strip()
         ctx = self.combo_context.currentText().strip()
-        f = self.spin_frame.value()
+        f = self.spin_frame.value() - 1
         t = self.spin_time.value()
         subj = self.txt_subject.text().strip()
         desc = self.txt_desc.text().strip()
@@ -339,7 +339,7 @@ class EventManagerDialog(QDialog):
             return
 
         self.lbl_info.setText(
-            f"Total Events: {len(self.trial.events)}  |  Point Rate: {self.trial.point_rate:.1f} Hz  |  Current Frame: {self.current_frame}"
+            f"Total Events: {len(self.trial.events)}  |  Point Rate: {round(self.trial.point_rate):.0f} Hz  |  Current Frame: {self.current_frame + 1}"
         )
 
         self.table.setRowCount(len(self.trial.events))
@@ -356,7 +356,7 @@ class EventManagerDialog(QDialog):
             self.table.setItem(row, 1, t_item)
 
             # Frame
-            f_item = QTableWidgetItem(str(ev.frame))
+            f_item = QTableWidgetItem(str(ev.frame + 1))
             f_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row, 2, f_item)
 
@@ -422,7 +422,7 @@ class EventManagerDialog(QDialog):
             return
 
         if len(evs) == 1:
-            msg = f"Are you sure you want to delete event '{evs[0].display_name}' at frame {evs[0].frame}?"
+            msg = f"Are you sure you want to delete event '{evs[0].display_name}' at frame {evs[0].frame + 1}?"
         else:
             msg = f"Are you sure you want to delete all {len(evs)} selected events?"
 
@@ -475,7 +475,7 @@ class EventManagerDialog(QDialog):
                 act_edit.triggered.connect(self._on_edit_selected)
                 act_del = menu.addAction(f"Delete '{ev.display_name}'")
                 act_del.triggered.connect(self._on_delete_selected)
-                act_jump = menu.addAction(f"Jump to Frame {ev.frame}")
+                act_jump = menu.addAction(f"Jump to Frame {ev.frame + 1}")
                 act_jump.triggered.connect(self._on_jump_to_event)
                 menu.addSeparator()
             else:

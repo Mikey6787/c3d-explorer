@@ -87,6 +87,8 @@ print("Batch color reset verified.")
 
 # 5. Test MainWindow integration
 win = MainWindow()
+win.resize(1000, 700)
+win.show()
 win.trial = trial
 win.viewer_3d.load_trial(trial)
 win.side_panel.load_trial(trial)
@@ -97,5 +99,66 @@ win.side_panel.markersColorChanged.emit(["M02", "M03", "M04"], test_color)
 for m in ["M02", "M03", "M04"]:
     assert m in win.viewer_3d.custom_marker_colors, f"Marker {m} not colored in MainWindow viewer"
 print("MainWindow signal forwarding and status message verified.")
+
+# 6. Test direct click on the marker circular color icon in the side panel
+from PySide6.QtWidgets import QColorDialog, QStyle, QStyleOptionViewItem
+table = win.side_panel.markers_table
+item = table.item(0, 0)
+marker_name = item.text()
+assert marker_name == "M00"
+
+opt = QStyleOptionViewItem()
+table.initViewItemOption(opt)
+opt.rect = table.visualItemRect(item)
+opt.features |= QStyleOptionViewItem.HasDecoration | QStyleOptionViewItem.HasCheckIndicator
+icon_rect = table.style().subElementRect(QStyle.SE_ItemViewItemDecoration, opt, table)
+center = icon_rect.center()
+
+# Test hover over circle icon
+from PySide6.QtCore import QPoint, QEvent
+from PySide6.QtGui import QMouseEvent
+ev_hover = QMouseEvent(QEvent.MouseMove, center, center, Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+app.sendEvent(table.viewport(), ev_hover)
+assert table.viewport().cursor().shape() == Qt.PointingHandCursor, "Hovering over circle icon should set PointingHandCursor"
+
+# Test move away
+ev_away = QMouseEvent(QEvent.MouseMove, QPoint(5, 5), QPoint(5, 5), Qt.NoButton, Qt.NoButton, Qt.NoModifier)
+app.sendEvent(table.viewport(), ev_away)
+assert table.viewport().cursor().shape() != Qt.PointingHandCursor, "Moving away should restore cursor"
+
+# Mock QColorDialog.getColor to return new color #12AACC
+circle_col = QColor("#12AACC")
+old_get_color = QColorDialog.getColor
+QColorDialog.getColor = lambda *args, **kwargs: circle_col
+
+try:
+    QTest.mousePress(table.viewport(), Qt.LeftButton, Qt.NoModifier, center)
+    QTest.mouseRelease(table.viewport(), Qt.LeftButton, Qt.NoModifier, center)
+finally:
+    QColorDialog.getColor = old_get_color
+
+assert win.side_panel.marker_colors["M00"].name() == "#12aacc", "Side panel marker color should be updated on circle click"
+assert "M00" in win.viewer_3d.custom_marker_colors, "Viewer 3D should update marker color on circle click"
+assert win.undo_stack.canUndo(), "Undo stack should have the color change command"
+print("Circle icon click directly changed marker color and registered undo command.")
+
+# Test Undo
+win.undo_stack.undo()
+assert "M00" not in win.side_panel.marker_colors or win.side_panel.marker_colors["M00"] is None
+print("Undo restored previous color.")
+
+# Test Redo
+win.undo_stack.redo()
+assert win.side_panel.marker_colors["M00"].name() == "#12aacc"
+print("Redo reapplied circle click color.")
+
+# 7. Test clicking checkbox toggles visibility without triggering color change
+check_rect = table.style().subElementRect(QStyle.SE_ItemViewItemCheckIndicator, opt, table)
+assert item.checkState() == Qt.Checked
+QTest.mouseClick(table.viewport(), Qt.LeftButton, Qt.NoModifier, check_rect.center())
+assert item.checkState() == Qt.Unchecked, "Clicking checkbox should toggle to Unchecked"
+QTest.mouseClick(table.viewport(), Qt.LeftButton, Qt.NoModifier, check_rect.center())
+assert item.checkState() == Qt.Checked, "Clicking checkbox again should toggle to Checked"
+print("Checkbox toggling verified completely independent of circle icon click.")
 
 print("ALL MARKER MULTI-SELECT & BATCH COLOR TESTS PASSED SUCCESSFULLY!", flush=True)

@@ -268,9 +268,9 @@ class MeasureDistanceDialog(QDialog):
         if self._distance_trajectory is not None and frame_idx < len(self._distance_trajectory):
             d = self._distance_trajectory[frame_idx]
             if np.isnan(d):
-                self.lbl_cur_dist.setText(f"Frame {frame_idx} Distance: Missing / Untracked")
+                self.lbl_cur_dist.setText(f"Frame {frame_idx + 1} Distance: Missing / Untracked")
             else:
-                self.lbl_cur_dist.setText(f"Frame {frame_idx} Distance: {d:.2f} mm")
+                self.lbl_cur_dist.setText(f"Frame {frame_idx + 1} Distance: {d:.2f} mm")
 
     def _recompute(self):
         m1 = self.combo_m1.currentText()
@@ -300,7 +300,7 @@ class MeasureDistanceDialog(QDialog):
         roi_slice = self._distance_trajectory[start_f : end_f + 1]
         valid = roi_slice[~np.isnan(roi_slice)]
         is_trimmed = (start_f > 0 or end_f < n - 1)
-        prefix = f"ROI [F{start_f}–{end_f}]: " if is_trimmed else ""
+        prefix = f"ROI [F{start_f + 1}–{end_f + 1}]: " if is_trimmed else ""
 
         if len(valid) > 0:
             mean_d = float(np.mean(valid))
@@ -462,9 +462,9 @@ class MeasureAngleDialog(QDialog):
         if self._angle_trajectory is not None and frame_idx < len(self._angle_trajectory):
             a = self._angle_trajectory[frame_idx]
             if np.isnan(a):
-                self.lbl_cur_angle.setText(f"Frame {frame_idx} Angle: Missing / Untracked")
+                self.lbl_cur_angle.setText(f"Frame {frame_idx + 1} Angle: Missing / Untracked")
             else:
-                self.lbl_cur_angle.setText(f"Frame {frame_idx} Angle: {a:.2f}°")
+                self.lbl_cur_angle.setText(f"Frame {frame_idx + 1} Angle: {a:.2f}°")
 
     def _recompute(self):
         ma = self.combo_ma.currentText()
@@ -498,7 +498,7 @@ class MeasureAngleDialog(QDialog):
         roi_slice = self._angle_trajectory[start_f : end_f + 1]
         valid = roi_slice[~np.isnan(roi_slice)]
         is_trimmed = (start_f > 0 or end_f < n - 1)
-        prefix = f"ROI [F{start_f}–{end_f}]: " if is_trimmed else ""
+        prefix = f"ROI [F{start_f + 1}–{end_f + 1}]: " if is_trimmed else ""
 
         if len(valid) > 0:
             mean_a = float(np.mean(valid))
@@ -704,7 +704,7 @@ class AddMarkerDialog(QDialog):
 
         self.lbl_frames_info = QLabel(
             f"Active trial frame count: <b>{self.expected_frames} frames</b>"
-            f" ({self.trial.point_rate:.1f} Hz)" if self.trial else "No trial loaded"
+            f" ({round(self.trial.point_rate):.0f} Hz)" if self.trial else "No trial loaded"
         )
         self.lbl_frames_info.setStyleSheet("font-size: 12px;")
         header_layout.addWidget(self.lbl_frames_info)
@@ -724,19 +724,11 @@ class AddMarkerDialog(QDialog):
         color_row.setSpacing(8)
 
         self.btn_color_swatch = QPushButton()
-        self.btn_color_swatch.setFixedSize(36, 26)
+        self.btn_color_swatch.setFixedSize(48, 26)
         self.btn_color_swatch.setCursor(Qt.PointingHandCursor)
         self.btn_color_swatch.setToolTip("Click to select custom marker color")
         self.btn_color_swatch.clicked.connect(self._pick_color)
         color_row.addWidget(self.btn_color_swatch)
-
-        self.btn_pick_color = QPushButton("Choose Color...")
-        self.btn_pick_color.clicked.connect(self._pick_color)
-        color_row.addWidget(self.btn_pick_color)
-
-        self.lbl_color_hex = QLabel(self.selected_color.name().upper())
-        self.lbl_color_hex.setStyleSheet("color: #8C96AB; font-family: monospace;")
-        color_row.addWidget(self.lbl_color_hex)
         color_row.addStretch()
 
         form_props.addRow("Display Color:", color_row)
@@ -838,7 +830,6 @@ class AddMarkerDialog(QDialog):
         self.btn_color_swatch.setStyleSheet(
             f"background-color: {c_hex}; border: 1px solid #666; border-radius: 4px;"
         )
-        self.lbl_color_hex.setText(c_hex.upper())
 
     def _pick_color(self):
         col = QColorDialog.getColor(self.selected_color, self, "Select Marker Color")

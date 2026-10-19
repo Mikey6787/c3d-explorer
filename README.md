@@ -43,7 +43,7 @@ A cross-platform desktop application (Windows & macOS) for visualizing, analyzin
 - **Event Indicators**: Clean, color-coded vertical dashed lines at event timestamps without overlapping text labels (Red for Right leg, Cyan for Left leg, Amber for General).
 - **Channel Selector & Search**: Filter channels and toggle individual signals on/off.
 
-### 5. Multi-Tab Markers Panel
+### 5. Multi-Tab Data Explorer Panel
 - **Markers Tab**: Fast, single-column searchable marker checklist with visibility checkboxes, circular color indicators, individual color picker, and in-place renaming.
   - **Shift-Click & Multi-Selection**: Click any marker, hold <kbd>Shift</kbd>, and click another marker to select the entire range. Hold <kbd>Ctrl</kbd> / <kbd>Cmd</kbd> to toggle non-contiguous individual markers.
   - **Batch Color Assignment**: Right-click any selected group (or click `Color (N)...`) to choose a color that is applied simultaneously to all selected markers.
@@ -83,7 +83,7 @@ Under **`Tools -> Events`** (or timeline right-click):
   - **Multi-Selection in 3D**: Hold <kbd>Option</kbd> (macOS) or <kbd>Ctrl</kbd> (Windows/Linux) / <kbd>Shift</kbd> / <kbd>Cmd</kbd> while clicking markers to select multiple markers simultaneously.
   - Selected markers are highlighted with enlarged golden spheres and floating 3D text labels displaying their names.
   - Clicking empty 3D space deselects all markers.
-- **Bi-Directional Synchronization**: Selecting markers in the 3D viewport immediately highlights them in the Markers panel table, and selecting markers in the table immediately highlights them in the 3D viewport.
+- **Bi-Directional Synchronization**: Selecting markers in the 3D viewport immediately highlights them in the Data Explorer panel table, and selecting markers in the table immediately highlights them in the 3D viewport.
 - **Tools with Auto-Populated Preselection**:
   - **Create Average Marker (`Tools -> Marker -> Create Average Marker...`)**: Automatically pre-populates Marker 1 and Marker 2 with the selected markers and suggests a default name `Avg_M1_M2`. Computes midpoint trajectory across all frames.
   - **Measure Distance between 2 Markers**: Automatically pre-populates Marker 1 and Marker 2 with selected markers, calculates Euclidean distance in real-time, displays live distance and statistics (Mean, SD, Min, Max) calculated strictly within the trimmed Region of Interest (ROI), interactive 3D line overlay, and 2D trajectory plotting with ROI curve highlighting, interactive ROI drag handles, and one-click "Fit ROI" / "Crop to ROI" options.

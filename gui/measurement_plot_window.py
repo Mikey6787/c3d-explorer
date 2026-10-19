@@ -15,7 +15,7 @@ Features:
 
 from typing import Optional, Tuple
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QPointF
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
 )
 import pyqtgraph as pg
 import pyqtgraph.exporters
+
+from gui.plotter_window import enable_axis_wheel_zoom
 
 
 class MeasurementPlotWindow(QMainWindow):
@@ -54,8 +56,7 @@ class MeasurementPlotWindow(QMainWindow):
         self.unit = unit
         self.curve_type = curve_type
         self.current_frame = max(0, int(current_frame))
-        self.x_axis_mode = "time"  # "time" or "frame"
-        self.crop_to_roi: bool = False  # False = highlight ROI inside full curve; True = crop display to ROI only
+        self.x_axis_mode = "frame"  # "frame" (default) or "time"
 
         # Initialize trim range (ROI)
         n_points = len(self.y_data)
@@ -66,9 +67,9 @@ class MeasurementPlotWindow(QMainWindow):
         else:
             self.trim_range: Tuple[int, int] = (0, max(0, n_points - 1))
 
-        # Precompute X axes
-        self.x_frames = np.arange(n_points, dtype=float)
-        self.x_times = self.x_frames / self.point_rate
+        # Precompute X axes (Frames start from 1, Time starts from 0)
+        self.x_frames = 1.0 + np.arange(n_points, dtype=float)
+        self.x_times = np.arange(n_points, dtype=float) / self.point_rate
 
         self._init_ui()
         self._update_stats()
@@ -111,28 +112,29 @@ class MeasurementPlotWindow(QMainWindow):
 
         top_bar.addStretch()
 
-        # X-Axis Mode Buttons (Time vs Frames)
-        btn_time = QPushButton("Time (s)")
-        btn_time.setCheckable(True)
-        btn_time.setChecked(True)
-        btn_time.setCursor(Qt.PointingHandCursor)
-
+        # X-Axis Mode Buttons (Frames vs Time, Frames is default)
         btn_frame = QPushButton("Frames")
         btn_frame.setCheckable(True)
+        btn_frame.setChecked(True)
         btn_frame.setCursor(Qt.PointingHandCursor)
+
+        btn_time = QPushButton("Time (s)")
+        btn_time.setCheckable(True)
+        btn_time.setChecked(False)
+        btn_time.setCursor(Qt.PointingHandCursor)
 
         self.btn_group_mode = QButtonGroup(self)
         self.btn_group_mode.addButton(btn_time, 0)
         self.btn_group_mode.addButton(btn_frame, 1)
         self.btn_group_mode.idClicked.connect(self._on_axis_mode_changed)
 
-        top_bar.addWidget(btn_time)
         top_bar.addWidget(btn_frame)
+        top_bar.addWidget(btn_time)
 
         # Fit ROI button
         btn_fit_roi = QPushButton("Fit ROI")
         btn_fit_roi.setCursor(Qt.PointingHandCursor)
-        btn_fit_roi.setToolTip("Auto-fit horizontal and vertical zoom to trimmed ROI range")
+        btn_fit_roi.setToolTip("Auto-fit horizontal and vertical zoom strictly to trimmed ROI range")
         btn_fit_roi.clicked.connect(self.fit_roi)
         top_bar.addWidget(btn_fit_roi)
 
@@ -142,15 +144,6 @@ class MeasurementPlotWindow(QMainWindow):
         btn_fit.setToolTip("Auto-fit horizontal and vertical zoom to entire trial")
         btn_fit.clicked.connect(self.auto_range)
         top_bar.addWidget(btn_fit)
-
-        # Crop to ROI Toggle button
-        self.btn_crop_roi = QPushButton("Crop to ROI")
-        self.btn_crop_roi.setCheckable(True)
-        self.btn_crop_roi.setChecked(False)
-        self.btn_crop_roi.setCursor(Qt.PointingHandCursor)
-        self.btn_crop_roi.setToolTip("Toggle between Highlighting the ROI on full curve vs Plotting only the trimmed ROI")
-        self.btn_crop_roi.toggled.connect(self._on_crop_toggled)
-        top_bar.addWidget(self.btn_crop_roi)
 
         # Export CSV
         btn_csv = QPushButton("Export CSV")
@@ -182,26 +175,32 @@ class MeasurementPlotWindow(QMainWindow):
         axis_font.setPointSize(10)
         self.plot_item.getAxis("bottom").setStyle(tickFont=axis_font)
         self.plot_item.getAxis("left").setStyle(tickFont=axis_font)
-        self.plot_item.setLabel("bottom", "Time", units="s")
+        self.plot_item.setLabel("bottom", "Frame", units="")
         self.plot_item.setLabel("left", self.curve_type, units=self.unit)
+        enable_axis_wheel_zoom(self.plot_widget)
 
         # Colors: vivid highlight for ROI, dimmed pen for outside ROI
         self.accent_color = "#00E5FF" if "dist" in self.curve_type.lower() else "#FF7043"
 
         # 1. Background Curve Item (plotted for whole trial outside ROI, dimmed style)
         dim_color = QColor(70, 88, 110, 150)
+        init_x = self.x_frames if self.x_axis_mode == "frame" else self.x_times
         self.full_curve_item = self.plot_widget.plot(
-            self.x_times,
+            init_x,
             self.y_data,
             pen=pg.mkPen(color=dim_color, width=1.6, cosmetic=True),
             name="Outside ROI"
         )
 
         # 2. Shaded ROI Region Band (interactive, can drag boundaries or body)
-        t_start = self.trim_range[0] / self.point_rate
-        t_end = self.trim_range[1] / self.point_rate
+        if self.x_axis_mode == "frame":
+            r_start = float(self.trim_range[0] + 1)
+            r_end = float(self.trim_range[1] + 1)
+        else:
+            r_start = self.trim_range[0] / self.point_rate
+            r_end = self.trim_range[1] / self.point_rate
         self.roi_region = pg.LinearRegionItem(
-            values=[t_start, t_end],
+            values=[r_start, r_end],
             orientation=pg.LinearRegionItem.Vertical,
             brush=pg.mkBrush(0, 173, 181, 28),
             pen=pg.mkPen(color="#00ADB5", width=1.5, style=Qt.DashLine),
@@ -214,7 +213,7 @@ class MeasurementPlotWindow(QMainWindow):
 
         # 3. Vivid ROI Curve Item (high-contrast, full-strength highlight)
         self.roi_curve_item = self.plot_widget.plot(
-            self.x_times,
+            init_x,
             self.y_data,
             pen=pg.mkPen(color=self.accent_color, width=2.6, cosmetic=True),
             name="ROI Range"
@@ -222,9 +221,10 @@ class MeasurementPlotWindow(QMainWindow):
         # Compatibility alias
         self.curve_item = self.roi_curve_item
 
-        # 4. Interactive Vertical Time Cursor
+        # 4. Interactive Vertical Time / Frame Cursor
+        init_cur_x = float(self.current_frame + 1) if self.x_axis_mode == "frame" else (self.current_frame / self.point_rate)
         self.time_cursor = pg.InfiniteLine(
-            pos=0.0,
+            pos=init_cur_x,
             angle=90,
             movable=True,
             pen=pg.mkPen(color="#FFD740", width=1.8, style=Qt.DashLine),
@@ -239,6 +239,22 @@ class MeasurementPlotWindow(QMainWindow):
         self.lbl_hover_readout.setStyleSheet(
             "color: #94A3B8; font-size: 11px; padding: 2px 6px; background: transparent;"
         )
+
+        # On-curve hover indicator dot & floating label
+        self.hover_dot = pg.ScatterPlotItem(
+            size=10,
+            pen=pg.mkPen("#FFFFFF", width=1.5),
+            brush=pg.mkBrush(self.accent_color)
+        )
+        self.hover_dot.setZValue(120)
+        self.hover_dot.hide()
+        self.plot_widget.addItem(self.hover_dot)
+
+        self.hover_label = pg.TextItem(anchor=(0.5, 1.2))
+        self.hover_label.setZValue(121)
+        self.hover_label.hide()
+        self.plot_widget.addItem(self.hover_label)
+
         main_layout.addWidget(self.plot_widget, 1)
 
         bottom_bar = QHBoxLayout()
@@ -280,7 +296,7 @@ class MeasurementPlotWindow(QMainWindow):
                 t_start = start_f / self.point_rate
                 t_end = end_f / self.point_rate
                 stats_str = (
-                    f"ROI [F{start_f}–{end_f} | {t_start:.2f}s–{t_end:.2f}s]: "
+                    f"ROI [F{start_f + 1}–{end_f + 1} | {t_start:.2f}s–{t_end:.2f}s]: "
                     f"Mean: {mean_v:.2f} {self.unit}  |  "
                     f"SD: ±{std_v:.2f}  |  "
                     f"Min: {min_v:.2f}  |  "
@@ -302,7 +318,7 @@ class MeasurementPlotWindow(QMainWindow):
                     "padding: 4px 12px; color: #E2E8F0; font-size: 12px; font-weight: 500;"
                 )
         else:
-            prefix = f"ROI [F{start_f}–{end_f}]: " if is_trimmed else ""
+            prefix = f"ROI [F{start_f + 1}–{end_f + 1}]: " if is_trimmed else ""
             stats_str = f"{prefix}No valid tracking data in range"
             self.lbl_stats.setStyleSheet(
                 "background: #1E2433; border: 1px solid #333F54; border-radius: 12px; "
@@ -329,18 +345,14 @@ class MeasurementPlotWindow(QMainWindow):
             if self.x_axis_mode == "time":
                 self.roi_region.setRegion([start_f / self.point_rate, end_f / self.point_rate])
             else:
-                self.roi_region.setRegion([float(start_f), float(end_f)])
+                self.roi_region.setRegion([float(start_f + 1), float(end_f + 1)])
             self.roi_region.setVisible(is_trimmed)
             self.roi_region.blockSignals(False)
 
         roi_x = x_data[start_f : end_f + 1]
         roi_y = self.y_data[start_f : end_f + 1]
 
-        if self.crop_to_roi and is_trimmed:
-            # Show ONLY the trimmed ROI section
-            self.full_curve_item.clear()
-            self.roi_curve_item.setData(roi_x, roi_y)
-        elif is_trimmed:
+        if is_trimmed:
             # Highlight ROI section within full curve (full curve outside ROI is dimmed)
             self.full_curve_item.setData(x_data, self.y_data)
             self.roi_curve_item.setData(roi_x, roi_y)
@@ -370,8 +382,8 @@ class MeasurementPlotWindow(QMainWindow):
             start_f = int(round(bounds[0] * self.point_rate))
             end_f = int(round(bounds[1] * self.point_rate))
         else:
-            start_f = int(round(bounds[0]))
-            end_f = int(round(bounds[1]))
+            start_f = int(round(bounds[0])) - 1
+            end_f = int(round(bounds[1])) - 1
 
         n = len(self.y_data)
         start_f = max(0, min(n - 1, start_f))
@@ -387,18 +399,6 @@ class MeasurementPlotWindow(QMainWindow):
 
         self.update_frame(self.current_frame)
         self.trimRangeChanged.emit(start_f, end_f)
-
-    def _on_crop_toggled(self, checked: bool):
-        """Toggle between highlighting ROI vs displaying ROI only."""
-        self.crop_to_roi = checked
-        if checked:
-            self.btn_crop_roi.setText("Showing ROI Only")
-            self.btn_crop_roi.setStyleSheet("background: #00ADB5; color: #000; font-weight: 700;")
-            self.fit_roi()
-        else:
-            self.btn_crop_roi.setText("Crop to ROI")
-            self.btn_crop_roi.setStyleSheet("")
-        self._plot_curve()
 
     def fit_roi(self):
         """Auto fit horizontal and vertical view strictly to the trimmed ROI bounds."""
@@ -443,14 +443,15 @@ class MeasurementPlotWindow(QMainWindow):
         if self.x_axis_mode == "time":
             self.plot_item.setLabel("bottom", "Time", units="s")
         else:
-            self.plot_item.setLabel("bottom", "Frame Index", units="")
+            self.plot_item.setLabel("bottom", "Frame", units="")
+
+        if hasattr(self, "hover_dot"):
+            self.hover_dot.hide()
+            self.hover_label.hide()
 
         self._plot_curve()
         self.update_frame(self.current_frame)
-        if self.crop_to_roi:
-            self.fit_roi()
-        else:
-            self.auto_range()
+        self.auto_range()
 
     def update_frame(self, frame_idx: int):
         """Called dynamically during playback advances."""
@@ -467,12 +468,12 @@ class MeasurementPlotWindow(QMainWindow):
 
         # Update live value chip
         if np.isnan(val):
-            self.lbl_current_val.setText(f"Frame {clamped_idx}: Untracked{roi_tag}")
+            self.lbl_current_val.setText(f"Frame {clamped_idx + 1}: Untracked{roi_tag}")
         else:
-            self.lbl_current_val.setText(f"Frame {clamped_idx}: {val:.2f} {self.unit}{roi_tag}")
+            self.lbl_current_val.setText(f"Frame {clamped_idx + 1}: {val:.2f} {self.unit}{roi_tag}")
 
         # Update cursor line position
-        cursor_x = (clamped_idx / self.point_rate) if self.x_axis_mode == "time" else float(clamped_idx)
+        cursor_x = (clamped_idx / self.point_rate) if self.x_axis_mode == "time" else float(clamped_idx + 1)
         self.time_cursor.blockSignals(True)
         self.time_cursor.setValue(cursor_x)
         self.time_cursor.blockSignals(False)
@@ -483,8 +484,8 @@ class MeasurementPlotWindow(QMainWindow):
             time_s = max(0.0, pos_val)
             frame_idx = int(round(time_s * self.point_rate))
         else:
-            frame_idx = int(round(pos_val))
-            time_s = frame_idx / self.point_rate
+            frame_idx = int(round(pos_val)) - 1
+            time_s = max(0.0, frame_idx / self.point_rate)
 
         clamped_f = max(0, min(len(self.y_data) - 1, frame_idx))
         val = self.y_data[clamped_f]
@@ -493,33 +494,136 @@ class MeasurementPlotWindow(QMainWindow):
         roi_tag = "" if (start_f == 0 and end_f == len(self.y_data) - 1) else (" (In ROI)" if in_roi else " (Outside ROI)")
 
         if not np.isnan(val):
-            self.lbl_current_val.setText(f"Frame {clamped_f}: {val:.2f} {self.unit}{roi_tag}")
+            self.lbl_current_val.setText(f"Frame {clamped_f + 1}: {val:.2f} {self.unit}{roi_tag}")
 
         self.timeCursorMoved.emit(time_s)
 
     def _on_mouse_moved(self, evt):
-        pos = evt[0]
-        if self.plot_widget.sceneBoundingRect().contains(pos):
-            mouse_point = self.plot_item.vb.mapSceneToView(pos)
-            x_val = mouse_point.x()
-            y_val = mouse_point.y()
-            start_f, end_f = self.trim_range
+        pos = evt[0] if isinstance(evt, (tuple, list)) else evt
+        vb = self.plot_item.vb
+        if not vb.sceneBoundingRect().contains(pos) or len(self.y_data) == 0:
+            self.lbl_hover_readout.setText("")
+            if hasattr(self, "hover_dot"):
+                self.hover_dot.hide()
+                self.hover_label.hide()
+            return
 
-            if self.x_axis_mode == "time":
-                f_idx = int(round(x_val * self.point_rate))
-                in_roi = (start_f <= f_idx <= end_f)
-                roi_str = " [In ROI]" if in_roi else " [Outside ROI]"
-                self.lbl_hover_readout.setText(
-                    f"Hover: Time = {x_val:.3f} s (Frame {f_idx}){roi_str} | Value = {y_val:.2f} {self.unit}"
-                )
+        mouse_point = vb.mapSceneToView(pos)
+        x_val = mouse_point.x()
+        y_val = mouse_point.y()
+        scene_x = pos.x()
+        scene_y = pos.y()
+        start_f, end_f = self.trim_range
+
+        if self.x_axis_mode == "time":
+            f_idx = int(round(x_val * self.point_rate))
+            in_roi = (start_f <= f_idx <= end_f)
+            roi_str = " [In ROI]" if in_roi else " [Outside ROI]"
+            self.lbl_hover_readout.setText(
+                f"Hover: Time = {x_val:.3f} s (Frame {f_idx + 1}){roi_str} | Value = {y_val:.2f} {self.unit}"
+            )
+        else:
+            f_idx = int(round(x_val)) - 1
+            t_val = max(0.0, f_idx / self.point_rate)
+            in_roi = (start_f <= f_idx <= end_f)
+            roi_str = " [In ROI]" if in_roi else " [Outside ROI]"
+            self.lbl_hover_readout.setText(
+                f"Hover: Frame = {x_val:.1f} ({t_val:.3f} s){roi_str} | Value = {y_val:.2f} {self.unit}"
+            )
+
+        # Check distance to curve in screen pixels
+        x_data = self.x_times if self.x_axis_mode == "time" else self.x_frames
+        idx = int(np.clip(np.searchsorted(x_data, x_val), 0, len(x_data) - 1))
+        cand_indices = range(max(0, idx - 2), min(len(x_data), idx + 3))
+
+        best_dist_px = float("inf")
+        best_snap_x = 0.0
+        best_snap_y = 0.0
+        best_f = 0
+
+        for i in cand_indices:
+            xi = x_data[i]
+            yi = self.y_data[i]
+            if np.isnan(yi):
+                continue
+
+            pt_scene = vb.mapViewToScene(QPointF(float(xi), float(yi)))
+            d_pt = np.hypot(scene_x - pt_scene.x(), scene_y - pt_scene.y())
+            if d_pt < best_dist_px:
+                best_dist_px = d_pt
+                best_snap_x = float(xi)
+                best_snap_y = float(yi)
+                best_f = i
+
+            if i + 1 < len(x_data):
+                x_next = x_data[i + 1]
+                y_next = self.y_data[i + 1]
+                if not np.isnan(y_next):
+                    pt_next = vb.mapViewToScene(QPointF(float(x_next), float(y_next)))
+                    vx = pt_next.x() - pt_scene.x()
+                    vy = pt_next.y() - pt_scene.y()
+                    len_sq = vx * vx + vy * vy
+                    if len_sq > 1e-4:
+                        wx = scene_x - pt_scene.x()
+                        wy = scene_y - pt_scene.y()
+                        t = max(0.0, min(1.0, (wx * vx + wy * vy) / len_sq))
+                        proj_x = pt_scene.x() + t * vx
+                        proj_y = pt_scene.y() + t * vy
+                        d_seg = np.hypot(scene_x - proj_x, scene_y - proj_y)
+                        if d_seg < best_dist_px:
+                            best_dist_px = d_seg
+                            if t < 0.5:
+                                best_snap_x = float(xi)
+                                best_snap_y = float(yi)
+                                best_f = i
+                            else:
+                                best_snap_x = float(x_next)
+                                best_snap_y = float(y_next)
+                                best_f = i + 1
+
+        HOVER_PIXEL_THRESHOLD = 25.0
+        if best_dist_px <= HOVER_PIXEL_THRESHOLD:
+            col = self.accent_color
+            t_val = best_f / self.point_rate
+            in_roi = (start_f <= best_f <= end_f)
+            roi_tag = " • In ROI" if in_roi else " • Outside ROI"
+
+            # Dynamic anchor positioning so label never leaves viewport
+            view_range_x = vb.viewRange()[0]
+            view_range_y = vb.viewRange()[1]
+            x_span = max(1e-9, view_range_x[1] - view_range_x[0])
+            y_span = max(1e-9, view_range_y[1] - view_range_y[0])
+            x_frac = (best_snap_x - view_range_x[0]) / x_span
+            y_frac = (best_snap_y - view_range_y[0]) / y_span
+
+            anchor_y = -0.2 if y_frac > 0.80 else 1.25
+            if x_frac > 0.85:
+                anchor_x = 1.05
+            elif x_frac < 0.15:
+                anchor_x = -0.05
             else:
-                f_idx = int(round(x_val))
-                t_val = f_idx / self.point_rate
-                in_roi = (start_f <= f_idx <= end_f)
-                roi_str = " [In ROI]" if in_roi else " [Outside ROI]"
-                self.lbl_hover_readout.setText(
-                    f"Hover: Frame = {x_val:.1f} ({t_val:.3f} s){roi_str} | Value = {y_val:.2f} {self.unit}"
-                )
+                anchor_x = 0.5
+
+            html = (
+                f'<div style="background-color: rgba(18, 24, 38, 0.94); '
+                f'border: 1.5px solid {col}; border-radius: 6px; '
+                f'padding: 4px 8px; color: #FFFFFF; font-family: sans-serif; font-size: 11px; line-height: 1.3;">'
+                f'<span style="color: {col}; font-weight: 600;">{self.curve_title}</span><br/>'
+                f'<span style="color: #FFFFFF; font-size: 13px; font-weight: bold;">{best_snap_y:.2f} {self.unit}</span><br/>'
+                f'<span style="color: #94A3B8; font-size: 10px;">Frame {best_f + 1} • {t_val:.3f} s{roi_tag}</span>'
+                f'</div>'
+            )
+
+            self.hover_dot.setData([best_snap_x], [best_snap_y])
+            self.hover_dot.show()
+
+            self.hover_label.setAnchor((anchor_x, anchor_y))
+            self.hover_label.setHtml(html)
+            self.hover_label.setPos(best_snap_x, best_snap_y)
+            self.hover_label.show()
+        else:
+            self.hover_dot.hide()
+            self.hover_label.hide()
 
     def export_csv(self):
         """Export measurement data to a CSV file (honoring ROI range)."""
@@ -529,7 +633,7 @@ class MeasurementPlotWindow(QMainWindow):
             return
 
         start_f, end_f = self.trim_range
-        row_range = range(start_f, end_f + 1) if self.crop_to_roi else range(len(self.y_data))
+        row_range = range(len(self.y_data))
 
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -538,7 +642,7 @@ class MeasurementPlotWindow(QMainWindow):
                     t = i / self.point_rate
                     val_str = f"{self.y_data[i]:.4f}" if not np.isnan(self.y_data[i]) else ""
                     in_roi_str = "1" if (start_f <= i <= end_f) else "0"
-                    f.write(f"{i},{t:.5f},{val_str},{in_roi_str}\n")
+                    f.write(f"{i + 1},{t:.5f},{val_str},{in_roi_str}\n")
             QMessageBox.information(self, "Export Successful", f"Saved curve data to:\n{path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export CSV:\n{e}")

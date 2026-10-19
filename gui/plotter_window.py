@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Optional, Tuple
 import numpy as np
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QObject, QEvent, QPointF
 from PySide6.QtGui import QColor, QFont, QKeySequence, QIcon, QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -14,6 +14,271 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 
 from core.data_models import C3DTrial
+
+
+class PlotAxisZoomFilter(QObject):
+    """
+    Event filter installed on a PyQtGraph PlotWidget viewport.
+    Enables single-axis scaling and zooming without moving/panning:
+    - Grabbing (click & drag) on the bottom X-axis scales ONLY the X-axis (in place, centered).
+    - Grabbing (click & drag) on the left Y-axis scales ONLY the Y-axis (in place, centered).
+    - Scrolling mouse wheel over the bottom X-axis scales ONLY the X-axis (in place, centered).
+    - Scrolling mouse wheel over the left Y-axis scales ONLY the Y-axis (in place, centered).
+    - Shift + Scroll inside plot scales the X-axis.
+    - Ctrl / Cmd / Alt + Scroll inside plot scales the Y-axis.
+    - Updates mouse hover cursor to SizeHorCursor on X-axis and SizeVerCursor on Y-axis.
+    """
+
+    def __init__(self, plot_widget: pg.PlotWidget):
+        super().__init__(plot_widget)
+        self.plot_widget = plot_widget
+        self.plot_item = plot_widget.getPlotItem()
+        self.view_box = self.plot_item.getViewBox()
+        self.axis_bottom = self.plot_item.getAxis("bottom")
+        self.axis_left = self.plot_item.getAxis("left")
+        self._custom_cursor_set = False
+        self._drag_axis: Optional[str] = None
+        self._last_drag_pos = None
+
+    def zoom_axis(
+        self,
+        axis_name: str,
+        scene_pos: QPointF,
+        delta: float,
+        use_center: bool = False,
+        scale_factor: Optional[float] = None
+    ):
+        """Scale a single axis (x or y). If use_center=True, scales symmetrically around range center so axis does not move."""
+        if scale_factor is None:
+            if delta == 0:
+                return
+            scale_factor = 0.88 ** (delta / 120.0)
+
+        vb = self.view_box
+        if axis_name == "x":
+            x_min, x_max = vb.viewRange()[0]
+            if use_center:
+                cx = 0.5 * (x_min + x_max)
+            else:
+                view_pt = vb.mapSceneToView(scene_pos)
+                cx = float(view_pt.x())
+            new_xmin = cx - (cx - x_min) * scale_factor
+            new_xmax = cx + (x_max - cx) * scale_factor
+            span = new_xmax - new_xmin
+            if 1e-6 < span < 1e9:
+                vb.setXRange(new_xmin, new_xmax, padding=0.0)
+        elif axis_name == "y":
+            y_min, y_max = vb.viewRange()[1]
+            if use_center:
+                cy = 0.5 * (y_min + y_max)
+            else:
+                view_pt = vb.mapSceneToView(scene_pos)
+                cy = float(view_pt.y())
+            new_ymin = cy - (cy - y_min) * scale_factor
+            new_ymax = cy + (y_max - cy) * scale_factor
+            span = new_ymax - new_ymin
+            if 1e-6 < span < 1e9:
+                vb.setYRange(new_ymin, new_ymax, padding=0.0)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        vb_rect = self.view_box.mapRectToScene(self.view_box.rect())
+        axis_b_rect = self.axis_bottom.mapRectToScene(self.axis_bottom.rect())
+        axis_l_rect = self.axis_left.mapRectToScene(self.axis_left.rect())
+
+        if event.type() == QEvent.MouseButtonPress:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            scene_pos = self.plot_widget.mapToScene(pos)
+
+            over_x = axis_b_rect.contains(scene_pos) or (
+                scene_pos.y() >= vb_rect.bottom() - 2 and
+                vb_rect.left() <= scene_pos.x() <= vb_rect.right()
+            )
+            over_y = axis_l_rect.contains(scene_pos) or (
+                scene_pos.x() <= vb_rect.left() + 2 and
+                vb_rect.top() <= scene_pos.y() <= vb_rect.bottom()
+            )
+
+            if over_x:
+                self._drag_axis = "x"
+                self._last_drag_pos = pos
+                self.plot_widget.viewport().setCursor(Qt.SizeHorCursor)
+                self._custom_cursor_set = True
+                return True
+            elif over_y:
+                self._drag_axis = "y"
+                self._last_drag_pos = pos
+                self.plot_widget.viewport().setCursor(Qt.SizeVerCursor)
+                self._custom_cursor_set = True
+                return True
+
+        elif event.type() == QEvent.MouseMove:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+
+            if self._drag_axis is not None and self._last_drag_pos is not None:
+                dx = pos.x() - self._last_drag_pos.x()
+                dy = pos.y() - self._last_drag_pos.y()
+                self._last_drag_pos = pos
+
+                if self._drag_axis == "x":
+                    diff = dx - dy if (abs(dx) > 0 and abs(dy) > 0) else (dx if abs(dx) >= abs(dy) else -dy)
+                    if diff != 0:
+                        scale_factor = 0.988 ** diff
+                        self.zoom_axis("x", scene_pos=QPointF(0, 0), delta=0, use_center=True, scale_factor=scale_factor)
+                    self.plot_widget.viewport().setCursor(Qt.SizeHorCursor)
+                    return True
+                elif self._drag_axis == "y":
+                    diff = -dy + dx if (abs(dx) > 0 and abs(dy) > 0) else (-dy if abs(dy) >= abs(dx) else dx)
+                    if diff != 0:
+                        scale_factor = 0.988 ** diff
+                        self.zoom_axis("y", scene_pos=QPointF(0, 0), delta=0, use_center=True, scale_factor=scale_factor)
+                    self.plot_widget.viewport().setCursor(Qt.SizeVerCursor)
+                    return True
+
+            scene_pos = self.plot_widget.mapToScene(pos)
+            over_x = axis_b_rect.contains(scene_pos) or (
+                scene_pos.y() >= vb_rect.bottom() - 2 and
+                vb_rect.left() <= scene_pos.x() <= vb_rect.right()
+            )
+            over_y = axis_l_rect.contains(scene_pos) or (
+                scene_pos.x() <= vb_rect.left() + 2 and
+                vb_rect.top() <= scene_pos.y() <= vb_rect.bottom()
+            )
+
+            if over_x:
+                self.plot_widget.viewport().setCursor(Qt.SizeHorCursor)
+                self._custom_cursor_set = True
+            elif over_y:
+                self.plot_widget.viewport().setCursor(Qt.SizeVerCursor)
+                self._custom_cursor_set = True
+            elif self._custom_cursor_set:
+                self.plot_widget.viewport().unsetCursor()
+                self._custom_cursor_set = False
+
+        elif event.type() == QEvent.MouseButtonRelease:
+            if self._drag_axis is not None:
+                self._drag_axis = None
+                self._last_drag_pos = None
+                return True
+
+        elif event.type() == QEvent.Leave:
+            if self._custom_cursor_set and self._drag_axis is None:
+                self.plot_widget.viewport().unsetCursor()
+                self._custom_cursor_set = False
+
+        elif event.type() == QEvent.Wheel:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            scene_pos = self.plot_widget.mapToScene(pos)
+
+            delta = event.angleDelta().y()
+            if delta == 0:
+                delta = event.pixelDelta().y() if hasattr(event, "pixelDelta") else 0
+            if delta == 0:
+                delta = event.angleDelta().x()
+
+            if delta == 0:
+                return False
+
+            over_x = axis_b_rect.contains(scene_pos) or (
+                scene_pos.y() >= vb_rect.bottom() - 2 and
+                vb_rect.left() <= scene_pos.x() <= vb_rect.right()
+            )
+            over_y = axis_l_rect.contains(scene_pos) or (
+                scene_pos.x() <= vb_rect.left() + 2 and
+                vb_rect.top() <= scene_pos.y() <= vb_rect.bottom()
+            )
+
+            modifiers = event.modifiers()
+            shift_pressed = bool(modifiers & Qt.ShiftModifier)
+            ctrl_pressed = bool(modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))
+
+            if over_x:
+                self.zoom_axis("x", scene_pos, delta, use_center=True)
+                event.accept()
+                return True
+            elif over_y:
+                self.zoom_axis("y", scene_pos, delta, use_center=True)
+                event.accept()
+                return True
+            elif shift_pressed and vb_rect.contains(scene_pos):
+                self.zoom_axis("x", scene_pos, delta, use_center=False)
+                event.accept()
+                return True
+            elif ctrl_pressed and vb_rect.contains(scene_pos):
+                self.zoom_axis("y", scene_pos, delta, use_center=False)
+                event.accept()
+                return True
+
+        return super().eventFilter(watched, event)
+
+
+def enable_axis_wheel_zoom(plot_widget: pg.PlotWidget) -> PlotAxisZoomFilter:
+    """
+    Configure a PlotWidget so that grabbing/dragging or scrolling on the X-axis
+    zooms only horizontally (in place, without moving/panning), and grabbing/dragging
+    or scrolling on the Y-axis zooms only vertically.
+    Also provides hover indicators and tooltips on both axes.
+    """
+    filt = PlotAxisZoomFilter(plot_widget)
+    plot_widget.viewport().installEventFilter(filt)
+
+    plot_item = plot_widget.getPlotItem()
+    axis_b = plot_item.getAxis("bottom")
+    axis_l = plot_item.getAxis("left")
+
+    axis_b.setToolTip("Grab & drag or scroll wheel to scale X-axis (Shift+Scroll in plot)")
+    axis_l.setToolTip("Grab & drag or scroll wheel to scale Y-axis (Ctrl+Scroll in plot)")
+
+    def _on_bottom_axis_wheel(ev):
+        delta = ev.delta() if hasattr(ev, "delta") else ev.angleDelta().y()
+        if delta == 0 and hasattr(ev, "pixelDelta"):
+            delta = ev.pixelDelta().y()
+        if delta == 0 and hasattr(ev, "angleDelta"):
+            delta = ev.angleDelta().x()
+        if delta != 0:
+            scene_pos = ev.scenePos() if hasattr(ev, "scenePos") else plot_item.getViewBox().mapViewToScene(
+                QPointF(plot_item.getViewBox().viewRange()[0][0], 0)
+            )
+            filt.zoom_axis("x", scene_pos, delta, use_center=True)
+        ev.accept()
+
+    def _on_left_axis_wheel(ev):
+        delta = ev.delta() if hasattr(ev, "delta") else ev.angleDelta().y()
+        if delta == 0 and hasattr(ev, "pixelDelta"):
+            delta = ev.pixelDelta().y()
+        if delta != 0:
+            scene_pos = ev.scenePos() if hasattr(ev, "scenePos") else plot_item.getViewBox().mapViewToScene(
+                QPointF(0, plot_item.getViewBox().viewRange()[1][0])
+            )
+            filt.zoom_axis("y", scene_pos, delta, use_center=True)
+        ev.accept()
+
+    def _on_bottom_axis_drag(ev):
+        ev.accept()
+        delta = ev.screenPos() - ev.lastScreenPos()
+        dx = delta.x()
+        dy = delta.y()
+        diff = dx - dy if (abs(dx) > 0 and abs(dy) > 0) else (dx if abs(dx) >= abs(dy) else -dy)
+        if diff != 0:
+            scale_factor = 0.988 ** diff
+            filt.zoom_axis("x", scene_pos=QPointF(0, 0), delta=0, use_center=True, scale_factor=scale_factor)
+
+    def _on_left_axis_drag(ev):
+        ev.accept()
+        delta = ev.screenPos() - ev.lastScreenPos()
+        dx = delta.x()
+        dy = delta.y()
+        diff = -dy + dx if (abs(dx) > 0 and abs(dy) > 0) else (-dy if abs(dy) >= abs(dx) else dx)
+        if diff != 0:
+            scale_factor = 0.988 ** diff
+            filt.zoom_axis("y", scene_pos=QPointF(0, 0), delta=0, use_center=True, scale_factor=scale_factor)
+
+    axis_b.wheelEvent = _on_bottom_axis_wheel
+    axis_l.wheelEvent = _on_left_axis_wheel
+    axis_b.mouseDragEvent = _on_bottom_axis_drag
+    axis_l.mouseDragEvent = _on_left_axis_drag
+
+    plot_widget._axis_zoom_filter = filt
+    return filt
 
 
 PLOT_COLORS = [
@@ -54,9 +319,10 @@ class UniversalPlotterWindow(QMainWindow):
 
         self.trial: Optional[C3DTrial] = trial
         self.current_frame: int = current_frame
-        self.x_axis_mode: str = "time"  # "time" or "frame"
+        self.x_axis_mode: str = "frame"  # "frame" (default) or "time"
         self.trim_range: Optional[Tuple[int, int]] = None
         self.roi_region: Optional[pg.LinearRegionItem] = None
+        self.event_lines: List[pg.InfiniteLine] = []
 
         # Signal storage: item_id -> {"x": np.ndarray, "y": np.ndarray, "label": str, "unit": str, "rate": float, "subsamples": int}
         self.active_curves: Dict[str, pg.PlotDataItem] = {}
@@ -82,27 +348,32 @@ class UniversalPlotterWindow(QMainWindow):
         # X-Axis Mode Radio Buttons
         x_group = QGroupBox("Horizontal Axis (X):") if False else None
         top_bar.addWidget(QLabel("<b>Horizontal Axis:</b>"))
-        self.rb_time = QRadioButton("Time (seconds)")
-        self.rb_time.setChecked(True)
-        self.rb_time.toggled.connect(self._on_x_axis_mode_changed)
-        top_bar.addWidget(self.rb_time)
-
         self.rb_frame = QRadioButton("Frame Number")
+        self.rb_frame.setChecked(True)
         self.rb_frame.toggled.connect(self._on_x_axis_mode_changed)
         top_bar.addWidget(self.rb_frame)
+
+        self.rb_time = QRadioButton("Time (seconds)")
+        self.rb_time.setChecked(False)
+        self.rb_time.toggled.connect(self._on_x_axis_mode_changed)
+        top_bar.addWidget(self.rb_time)
 
         top_bar.addSpacing(16)
 
         btn_fit_roi = QPushButton("Fit ROI")
-        btn_fit_roi.setToolTip("Auto-fit horizontal zoom to trimmed Region of Interest (ROI)")
+        btn_fit_roi.setCursor(Qt.PointingHandCursor)
+        btn_fit_roi.setToolTip("Auto-fit horizontal and vertical zoom to trimmed Region of Interest (ROI)")
         btn_fit_roi.clicked.connect(self.fit_roi)
         top_bar.addWidget(btn_fit_roi)
 
-        btn_fit = QPushButton("Auto Range / Fit")
+        btn_fit = QPushButton("Fit Full")
+        btn_fit.setCursor(Qt.PointingHandCursor)
+        btn_fit.setToolTip("Auto-fit horizontal and vertical zoom to entire trial")
         btn_fit.clicked.connect(self.auto_range)
         top_bar.addWidget(btn_fit)
 
         btn_clear = QPushButton("Clear All Curves")
+        btn_clear.setCursor(Qt.PointingHandCursor)
         btn_clear.clicked.connect(self.clear_all_curves)
         top_bar.addWidget(btn_clear)
 
@@ -156,21 +427,44 @@ class UniversalPlotterWindow(QMainWindow):
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground("#151720")
         self.plot_widget.showGrid(x=True, y=True, alpha=0.25)
-        self.plot_widget.setLabel("bottom", "Time", units="s")
+        self.plot_widget.setLabel("bottom", "Frame", units="")
         self.plot_widget.setLabel("left", "Value / Amplitude")
         self.plot_widget.addLegend(offset=(-20, 20))
+        enable_axis_wheel_zoom(self.plot_widget)
 
-        # Vertical Synchronized Time / Frame Cursor
+        # Vertical Synchronized Time / Frame Cursor (starts in Frame mode)
+        init_cur_val = float(self.current_frame + 1)
         self.time_cursor = pg.InfiniteLine(
-            pos=0.0,
+            pos=init_cur_val,
             angle=90,
             movable=True,
             pen=pg.mkPen(color="#00ADB5", width=2, style=Qt.SolidLine),
-            label="t={value:.3f}s",
+            label="Frame {value:.0f}",
             labelOpts={"color": "#FFFFFF", "fill": "#00ADB5", "position": 0.95}
         )
+        self.time_cursor.setZValue(100)
         self.time_cursor.sigPositionChanged.connect(self._on_cursor_dragged)
         self.plot_widget.addItem(self.time_cursor)
+        # On-curve hover indicator dot & floating label
+        self.hover_dot = pg.ScatterPlotItem(
+            size=10,
+            pen=pg.mkPen("#FFFFFF", width=1.5),
+            brush=pg.mkBrush("#00E5FF")
+        )
+        self.hover_dot.setZValue(120)
+        self.hover_dot.hide()
+        self.plot_widget.addItem(self.hover_dot)
+
+        self.hover_label = pg.TextItem(anchor=(0.5, 1.2))
+        self.hover_label.setZValue(121)
+        self.hover_label.hide()
+        self.plot_widget.addItem(self.hover_label)
+
+        self.mouse_proxy = pg.SignalProxy(
+            self.plot_widget.scene().sigMouseMoved,
+            rateLimit=40,
+            slot=self._on_mouse_moved
+        )
 
         splitter.addWidget(self.plot_widget)
         splitter.setSizes([300, 800])
@@ -197,6 +491,9 @@ class UniversalPlotterWindow(QMainWindow):
 
         for name in sorted(list(self.trial.markers.keys())):
             m_item = QTreeWidgetItem([name])
+            m_item.setFlags(m_item.flags() | Qt.ItemIsUserCheckable)
+            m_item.setCheckState(0, Qt.Unchecked)
+            m_item.setData(0, Qt.UserRole, ("marker_parent", name))
             markers_root.addChild(m_item)
 
             # Components: X, Y, Z, 3D Magnitude
@@ -265,8 +562,44 @@ class UniversalPlotterWindow(QMainWindow):
 
         self.tree.blockSignals(False)
 
+        # Draw vertical dashed lines at event timestamps like the analog panel
+        self._build_event_lines()
+
+        # Ensure synchronized playhead time cursor is present and visible
+        if self.time_cursor not in self.plot_widget.getPlotItem().items:
+            self.plot_widget.addItem(self.time_cursor)
+        self.time_cursor.show()
+
         # Update cursor position to current frame
         self.update_frame(self.current_frame)
+
+    def _build_event_lines(self):
+        """Draw vertical dashed lines at event timestamps like the analog panel."""
+        for line in self.event_lines:
+            try:
+                self.plot_widget.removeItem(line)
+            except Exception:
+                pass
+        self.event_lines.clear()
+        if not self.trial:
+            return
+
+        for ev in self.trial.events:
+            line_pos = (ev.frame + 1) if self.x_axis_mode == "frame" else ev.time
+            line = pg.InfiniteLine(
+                pos=line_pos,
+                angle=90,
+                movable=False,
+                pen=pg.mkPen(color=ev.icon_color, width=1.5, style=Qt.DashLine)
+            )
+            line.setZValue(5)
+            line.setToolTip(f"{ev.display_name} | Frame {ev.frame + 1} ({ev.time:.3f} s)")
+            self.plot_widget.addItem(line)
+            self.event_lines.append(line)
+
+    def reload_events(self):
+        """Rebuild event vertical marker lines on the plot."""
+        self._build_event_lines()
 
     # ---------------------------------------------------------
     # Tree Interaction & Filter
@@ -290,17 +623,64 @@ class UniversalPlotterWindow(QMainWindow):
             filter_item(self.tree.topLevelItem(i))
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int):
+        if getattr(self, "_is_updating_tree", False):
+            return
+
         role_data = item.data(0, Qt.UserRole)
         if not role_data:
             return
 
+        kind = role_data[0]
+        cur_state = item.checkState(0)
+
+        if kind == "marker_parent":
+            # User checked/unchecked a parent marker item directly -> check/uncheck all 4 components
+            self._is_updating_tree = True
+            try:
+                target_state = Qt.Checked if cur_state == Qt.Checked else Qt.Unchecked
+                item.setCheckState(0, target_state)
+                if target_state == Qt.Checked:
+                    item.setExpanded(True)
+                for i in range(item.childCount()):
+                    c_item = item.child(i)
+                    c_role = c_item.data(0, Qt.UserRole)
+                    c_lbl = c_item.text(0)
+                    c_item.setCheckState(0, target_state)
+                    if target_state == Qt.Checked:
+                        if c_role and c_lbl not in self.active_curves:
+                            self._add_signal(c_lbl, c_role)
+                    else:
+                        if c_lbl in self.active_curves:
+                            self._remove_signal(c_lbl)
+            finally:
+                self._is_updating_tree = False
+            return
+
         label = item.text(0)
-        is_checked = (item.checkState(0) == Qt.Checked)
+        is_checked = (cur_state == Qt.Checked)
 
         if is_checked:
             self._add_signal(label, role_data)
         else:
             self._remove_signal(label)
+
+        # Update parent marker item checkbox state if this is a marker component
+        parent = item.parent()
+        if parent:
+            p_role = parent.data(0, Qt.UserRole)
+            if p_role and p_role[0] == "marker_parent":
+                total = parent.childCount()
+                checked_count = sum(1 for i in range(total) if parent.child(i).checkState(0) == Qt.Checked)
+                self._is_updating_tree = True
+                try:
+                    if checked_count == total:
+                        parent.setCheckState(0, Qt.Checked)
+                    elif checked_count == 0:
+                        parent.setCheckState(0, Qt.Unchecked)
+                    else:
+                        parent.setCheckState(0, Qt.PartiallyChecked)
+                finally:
+                    self._is_updating_tree = False
 
     # ---------------------------------------------------------
     # Curve Adding & Removing
@@ -375,11 +755,28 @@ class UniversalPlotterWindow(QMainWindow):
         if y_data is None:
             return
 
+        unit = ""
+        if kind == "marker":
+            unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+        elif kind == "force":
+            unit = "N"
+        elif kind == "moment":
+            unit = "N·mm"
+        elif kind == "cop":
+            unit = "mm"
+        elif kind == "analog":
+            unit = self.trial.analog_units.get(role_data[1], "V") if self.trial and hasattr(self.trial, "analog_units") and self.trial.analog_units else "V"
+        elif kind == "distance":
+            unit = "mm"
+        elif kind == "angle":
+            unit = "deg"
+
         # Store data
         self.curve_data[label] = {
             "y": y_data,
             "rate": rate if rate > 0 else 100.0,
-            "subsamples": subsamples
+            "subsamples": subsamples,
+            "unit": unit
         }
 
         # Assign color
@@ -420,6 +817,9 @@ class UniversalPlotterWindow(QMainWindow):
             curve = self.active_curves.pop(label)
             self.plot_widget.removeItem(curve)
         self.curve_data.pop(label, None)
+        if hasattr(self, "hover_dot"):
+            self.hover_dot.hide()
+            self.hover_label.hide()
 
     def clear_all_curves(self):
         """Uncheck all tree items and clear the plot."""
@@ -440,6 +840,9 @@ class UniversalPlotterWindow(QMainWindow):
             self.plot_widget.removeItem(curve)
         self.active_curves.clear()
         self.curve_data.clear()
+        if hasattr(self, "hover_dot"):
+            self.hover_dot.hide()
+            self.hover_label.hide()
 
     # ---------------------------------------------------------
     # Programmatic Marker Plotting
@@ -594,17 +997,17 @@ class UniversalPlotterWindow(QMainWindow):
     def _compute_x_vec(self, n_points: int, rate: float, subsamples: int) -> np.ndarray:
         if self.x_axis_mode == "frame":
             if subsamples > 1:
-                return np.arange(n_points) / float(subsamples)
-            return np.arange(n_points, dtype=np.float32)
+                return 1.0 + np.arange(n_points) / float(subsamples)
+            return 1.0 + np.arange(n_points, dtype=np.float32)
         else:
             return np.arange(n_points) / float(rate)
 
     def _on_x_axis_mode_changed(self):
         self.x_axis_mode = "frame" if self.rb_frame.isChecked() else "time"
         if self.x_axis_mode == "frame":
-            self.plot_widget.setLabel("bottom", "Frame Number", units="")
+            self.plot_widget.setLabel("bottom", "Frame", units="")
             if hasattr(self.time_cursor, "label") and self.time_cursor.label:
-                self.time_cursor.label.setFormat("Frame {value:.1f}")
+                self.time_cursor.label.setFormat("Frame {value:.0f}")
         else:
             self.plot_widget.setLabel("bottom", "Time", units="s")
             if hasattr(self.time_cursor, "label") and self.time_cursor.label:
@@ -629,8 +1032,158 @@ class UniversalPlotterWindow(QMainWindow):
                 self.roi_region.setRegion([start_f / rate, end_f / rate])
             self.roi_region.blockSignals(False)
 
+        # Rebuild event lines to switch between frame positions and time positions
+        self._build_event_lines()
+
+        if hasattr(self, "hover_dot"):
+            self.hover_dot.hide()
+            self.hover_label.hide()
+
         self.update_frame(self.current_frame)
         self.auto_range()
+
+    def _on_mouse_moved(self, evt):
+        """Called when mouse moves over the plot. If hovering over a curve, shows label and dot."""
+        if not self.active_curves:
+            self.hover_dot.hide()
+            self.hover_label.hide()
+            return
+
+        pos = evt[0] if isinstance(evt, (tuple, list)) else evt
+        vb = self.plot_widget.getPlotItem().getViewBox()
+        if not vb.sceneBoundingRect().contains(pos):
+            self.hover_dot.hide()
+            self.hover_label.hide()
+            return
+
+        view_pt = vb.mapSceneToView(pos)
+        mouse_x = view_pt.x()
+        scene_x = pos.x()
+        scene_y = pos.y()
+
+        best_curve_label = None
+        best_dist_px = float("inf")
+        best_snap_x = 0.0
+        best_snap_y = 0.0
+        best_idx = 0
+
+        # Max pixel distance from curve to trigger hover label
+        HOVER_PIXEL_THRESHOLD = 25.0
+
+        for label, curve in self.active_curves.items():
+            curve_pts = curve.getData()
+            if curve_pts is None or len(curve_pts) < 2:
+                continue
+            x_data, y_data = curve_pts[0], curve_pts[1]
+            if x_data is None or y_data is None or len(x_data) == 0:
+                continue
+
+            # Binary search to find nearest index in sorted x_data
+            idx = int(np.clip(np.searchsorted(x_data, mouse_x), 0, len(x_data) - 1))
+            cand_indices = range(max(0, idx - 2), min(len(x_data), idx + 3))
+
+            for i in cand_indices:
+                xi = x_data[i]
+                yi = y_data[i]
+                if np.isnan(yi):
+                    continue
+
+                # Point distance in screen pixels
+                pt_scene = vb.mapViewToScene(QPointF(float(xi), float(yi)))
+                d_pt = np.hypot(scene_x - pt_scene.x(), scene_y - pt_scene.y())
+                if d_pt < best_dist_px:
+                    best_dist_px = d_pt
+                    best_curve_label = label
+                    best_snap_x = float(xi)
+                    best_snap_y = float(yi)
+                    best_idx = i
+
+                # Segment projection to next point in screen pixels
+                if i + 1 < len(x_data):
+                    x_next = x_data[i + 1]
+                    y_next = y_data[i + 1]
+                    if not np.isnan(y_next):
+                        pt_next = vb.mapViewToScene(QPointF(float(x_next), float(y_next)))
+                        vx = pt_next.x() - pt_scene.x()
+                        vy = pt_next.y() - pt_scene.y()
+                        len_sq = vx * vx + vy * vy
+                        if len_sq > 1e-4:
+                            wx = scene_x - pt_scene.x()
+                            wy = scene_y - pt_scene.y()
+                            t = max(0.0, min(1.0, (wx * vx + wy * vy) / len_sq))
+                            proj_x = pt_scene.x() + t * vx
+                            proj_y = pt_scene.y() + t * vy
+                            d_seg = np.hypot(scene_x - proj_x, scene_y - proj_y)
+                            if d_seg < best_dist_px:
+                                best_dist_px = d_seg
+                                best_curve_label = label
+                                if t < 0.5:
+                                    best_snap_x = float(xi)
+                                    best_snap_y = float(yi)
+                                    best_idx = i
+                                else:
+                                    best_snap_x = float(x_next)
+                                    best_snap_y = float(y_next)
+                                    best_idx = i + 1
+
+        if best_curve_label is not None and best_dist_px <= HOVER_PIXEL_THRESHOLD:
+            col = self.color_map.get(best_curve_label, "#00E5FF")
+            info = self.curve_data.get(best_curve_label, {})
+            unit = info.get("unit", "")
+            rate = info.get("rate", 100.0)
+            subsamples = info.get("subsamples", 1)
+
+            # Format value with unit
+            val_text = f"{best_snap_y:.2f}"
+            unit_str = f" {unit}" if unit else ""
+
+            # Frame and time indexing (frames start at 1, time starts at 0.0s)
+            if subsamples > 1:
+                f_val = 1.0 + best_idx / float(subsamples)
+                time_s = best_idx / float(rate)
+                frame_time_str = f"Frame {f_val:.1f} • {time_s:.3f} s"
+            else:
+                f_val = best_idx + 1
+                time_s = best_idx / float(rate)
+                frame_time_str = f"Frame {f_val} • {time_s:.3f} s"
+
+            # Dynamic anchor positioning so label never goes outside viewport
+            view_range_x = vb.viewRange()[0]
+            view_range_y = vb.viewRange()[1]
+            x_span = max(1e-9, view_range_x[1] - view_range_x[0])
+            y_span = max(1e-9, view_range_y[1] - view_range_y[0])
+            x_frac = (best_snap_x - view_range_x[0]) / x_span
+            y_frac = (best_snap_y - view_range_y[0]) / y_span
+
+            anchor_y = -0.2 if y_frac > 0.80 else 1.25
+            if x_frac > 0.85:
+                anchor_x = 1.05
+            elif x_frac < 0.15:
+                anchor_x = -0.05
+            else:
+                anchor_x = 0.5
+
+            html = (
+                f'<div style="background-color: rgba(18, 24, 38, 0.94); '
+                f'border: 1.5px solid {col}; border-radius: 6px; '
+                f'padding: 4px 8px; color: #FFFFFF; font-family: sans-serif; font-size: 11px; line-height: 1.3;">'
+                f'<span style="color: {col}; font-weight: 600;">{best_curve_label}</span><br/>'
+                f'<span style="color: #FFFFFF; font-size: 13px; font-weight: bold;">{val_text}{unit_str}</span><br/>'
+                f'<span style="color: #94A3B8; font-size: 10px;">{frame_time_str}</span>'
+                f'</div>'
+            )
+
+            self.hover_dot.setData([best_snap_x], [best_snap_y])
+            self.hover_dot.setBrush(pg.mkBrush(col))
+            self.hover_dot.show()
+
+            self.hover_label.setAnchor((anchor_x, anchor_y))
+            self.hover_label.setHtml(html)
+            self.hover_label.setPos(best_snap_x, best_snap_y)
+            self.hover_label.show()
+        else:
+            self.hover_dot.hide()
+            self.hover_label.hide()
 
     def set_trim_range(self, start_frame: int, end_frame: int):
         """Update ROI Region of Interest on UniversalPlotterWindow."""
@@ -645,8 +1198,8 @@ class UniversalPlotterWindow(QMainWindow):
         is_trimmed = (start_f > 0 or end_f < n - 1)
 
         if self.x_axis_mode == "frame":
-            reg_start = float(start_f)
-            reg_end = float(end_f)
+            reg_start = float(start_f + 1)
+            reg_end = float(end_f + 1)
         else:
             reg_start = start_f / rate
             reg_end = end_f / rate
@@ -673,7 +1226,7 @@ class UniversalPlotterWindow(QMainWindow):
             if is_trimmed:
                 t_s = start_f / rate
                 t_e = end_f / rate
-                self.lbl_roi_status.setText(f"ROI: F{start_f}–{end_f} ({t_s:.2f}s–{t_e:.2f}s)")
+                self.lbl_roi_status.setText(f"ROI: F{start_f + 1}–{end_f + 1} ({t_s:.2f}s–{t_e:.2f}s)")
                 self.lbl_roi_status.setStyleSheet(
                     "background: #142838; border: 1px solid #00ADB5; border-radius: 10px; "
                     "padding: 3px 8px; color: #00E5FF; font-size: 11px; font-weight: 600;"
@@ -691,8 +1244,8 @@ class UniversalPlotterWindow(QMainWindow):
         bounds = self.roi_region.getRegion()
         rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
         if self.x_axis_mode == "frame":
-            start_f = int(round(bounds[0]))
-            end_f = int(round(bounds[1]))
+            start_f = int(round(bounds[0])) - 1
+            end_f = int(round(bounds[1])) - 1
         else:
             start_f = int(round(bounds[0] * rate))
             end_f = int(round(bounds[1] * rate))
@@ -704,22 +1257,53 @@ class UniversalPlotterWindow(QMainWindow):
         self.trimRangeChanged.emit(start_f, end_f)
 
     def fit_roi(self):
-        """Fit horizontal zoom strictly to trimmed ROI range."""
-        if not self.trial or not self.trim_range:
+        """Fit horizontal and vertical zoom strictly to trimmed ROI range."""
+        if not self.trial:
+            self.auto_range()
             return
-        start_f, end_f = self.trim_range
+
+        n = self.trial.point_frame_count
+        start_f, end_f = self.trim_range if self.trim_range else (0, max(0, n - 1))
+        is_trimmed = (start_f > 0 or end_f < n - 1)
+
         rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
         if self.x_axis_mode == "frame":
-            x_min = float(start_f)
-            x_max = float(end_f)
+            x_min = float(start_f + 1)
+            x_max = float(end_f + 1)
         else:
             x_min = start_f / rate
             x_max = end_f / rate
         span = max(0.01, x_max - x_min)
         self.plot_widget.setXRange(x_min - span * 0.04, x_max + span * 0.04, padding=0.0)
 
+        # Scale vertical Y-axis strictly to the active signals within the ROI bounds
+        all_y_min, all_y_max = float("inf"), float("-inf")
+        for label in self.active_curves.keys():
+            info = self.curve_data.get(label)
+            if info:
+                y = info["y"]
+                subsamples = info.get("subsamples", 1)
+                s_idx = max(0, start_f * subsamples)
+                e_idx = min(len(y), (end_f + 1) * subsamples)
+                if e_idx > s_idx:
+                    roi_slice = y[s_idx : e_idx]
+                    valid = roi_slice[~np.isnan(roi_slice)]
+                    if len(valid) > 0:
+                        all_y_min = min(all_y_min, float(np.min(valid)))
+                        all_y_max = max(all_y_max, float(np.max(valid)))
+
+        if all_y_min < all_y_max:
+            y_span = all_y_max - all_y_min
+            pad_y = max(1.0, y_span * 0.08)
+            self.plot_widget.getPlotItem().setYRange(all_y_min - pad_y, all_y_max + pad_y, padding=0.0)
+        elif not is_trimmed:
+            self.auto_range()
+
     def showEvent(self, event):
         super().showEvent(event)
+        if self.time_cursor not in self.plot_widget.getPlotItem().items:
+            self.plot_widget.addItem(self.time_cursor)
+        self.time_cursor.show()
         self.update_frame(self.current_frame)
 
     # ---------------------------------------------------------
@@ -732,8 +1316,8 @@ class UniversalPlotterWindow(QMainWindow):
             return
 
         if self.x_axis_mode == "frame":
-            val = float(frame_idx)
-            text_str = f"Frame {frame_idx}"
+            val = float(frame_idx + 1)
+            text_str = f"Frame {frame_idx + 1}"
         else:
             val = self.trial.frame_to_time(frame_idx)
             text_str = f"t={val:.3f}s"
@@ -756,10 +1340,10 @@ class UniversalPlotterWindow(QMainWindow):
     def _on_cursor_dragged(self):
         val = float(self.time_cursor.value())
         if self.x_axis_mode == "frame":
-            t = val / self.trial.point_rate if self.trial and self.trial.point_rate > 0 else 0.0
-            self.current_frame = int(round(val))
+            self.current_frame = max(0, min(self.trial.point_frame_count - 1, int(round(val)) - 1)) if self.trial else 0
+            t = self.trial.frame_to_time(self.current_frame) if self.trial else 0.0
             if hasattr(self.time_cursor, "label") and self.time_cursor.label is not None:
-                self.time_cursor.label.setPlainText(f"Frame {self.current_frame}")
+                self.time_cursor.label.setPlainText(f"Frame {self.current_frame + 1}")
                 self.time_cursor.label.updatePosition()
         else:
             t = val

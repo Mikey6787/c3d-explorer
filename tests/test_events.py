@@ -20,11 +20,12 @@ trial = C3DReader.read(c3d_path)
 initial_event_count = len(trial.events)
 print(f"Loaded trial with {initial_event_count} initial events.", flush=True)
 
-# 1. Test EventEditDialog creation and data extraction
+# 1. Test EventEditDialog creation and data extraction (Frame input is 1-based, storage is 0-based)
 edit_dlg = EventEditDialog(trial=trial, current_frame=30)
+assert edit_dlg.spin_frame.value() == 31  # 1-based
 edit_dlg.combo_name.setCurrentText("Foot Strike")
 edit_dlg.combo_context.setCurrentText("Right")
-edit_dlg.spin_frame.setValue(40)
+edit_dlg.spin_frame.setValue(41)  # Frame 41 (1-based -> index 40)
 edit_dlg.txt_subject.setText("Runner01")
 edit_dlg.txt_desc.setText("Initial right heel strike")
 edit_dlg.spin_id.setValue(7)
@@ -32,7 +33,7 @@ new_ev = edit_dlg.get_event()
 
 assert new_ev.name == "Foot Strike"
 assert new_ev.context == "Right"
-assert new_ev.frame == 40
+assert new_ev.frame == 40  # 0-indexed
 assert abs(new_ev.time - 40 / trial.point_rate) < 1e-4
 assert new_ev.subject == "Runner01"
 assert new_ev.description == "Initial right heel strike"
@@ -89,5 +90,46 @@ print("SidePanel events table populated correctly!", flush=True)
 mgr_dlg = EventManagerDialog(trial=trial, current_frame=20)
 assert mgr_dlg.table.rowCount() == len(trial.events)
 print("EventManagerDialog loaded successfully!", flush=True)
+
+# 6. Test EventManagerDialog Add and Close workflow with Undo/Redo
+from gui.main_window import MainWindow
+from gui.undo_commands import EventsBatchCommand
+
+mw = MainWindow()
+mw.trial = trial
+mw.undo_stack.clear()
+initial_count = len(trial.events)
+initial_events = [e.clone() for e in trial.events]
+
+# Simulate user adding event in EventManagerDialog
+added_ev = C3DEvent(name="NewStrike", time=0.75, frame=75, context="Right", icon_color="#E53935")
+trial.events.append(added_ev)
+trial.events.sort(key=lambda e: e.time)
+
+new_events = [e.clone() for e in trial.events]
+cmd = EventsBatchCommand(mw, trial, initial_events, new_events)
+mw.undo_stack.push(cmd)
+
+# Verify events are NOT removed when closing EventManagerDialog
+assert len(trial.events) == initial_count + 1
+assert any(e.name == "NewStrike" for e in trial.events)
+for ev in trial.events:
+    assert isinstance(ev.time, float), f"ev.time must be float, got {type(ev.time)}"
+    assert isinstance(ev.frame, int), f"ev.frame must be int, got {type(ev.frame)}"
+
+# Verify side panel and timeline views update without error
+side_panel.load_trial(trial)
+assert side_panel.events_table.rowCount() == len(trial.events)
+
+# Test Undo
+mw.undo_stack.undo()
+assert len(trial.events) == initial_count
+assert not any(e.name == "NewStrike" for e in trial.events)
+
+# Test Redo
+mw.undo_stack.redo()
+assert len(trial.events) == initial_count + 1
+assert any(e.name == "NewStrike" for e in trial.events)
+print("EventManagerDialog add-and-close persistence & undo/redo verified!", flush=True)
 
 print("ALL EVENT SYSTEM TESTS PASSED PERFECTLY!", flush=True)

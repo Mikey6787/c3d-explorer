@@ -103,7 +103,7 @@ def run_tests():
     custom_color = QColor("#FF007F")
     dlg.selected_color = custom_color
     dlg._update_color_swatch()
-    assert dlg.lbl_color_hex.text() == "#FF007F"
+    assert "#FF007F" in dlg.btn_color_swatch.styleSheet().upper()
 
     # Test fixed position creation
     dlg.radio_fixed.setChecked(True)

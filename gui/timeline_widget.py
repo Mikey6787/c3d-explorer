@@ -1,7 +1,7 @@
 """Interactive custom timeline slider with integrated C3D event markers."""
 
-from typing import List, Optional
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from typing import List, Optional, Union
+from PySide6.QtCore import Qt, QRectF, QPointF, QPoint, Signal
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QFont, QMouseEvent, QPaintEvent, QPolygonF
 from PySide6.QtWidgets import QWidget, QToolTip, QMenu
 
@@ -24,6 +24,7 @@ class TimelineWidget(QWidget):
     editEventRequested = Signal(object)  # Emits C3DEvent
     deleteEventRequested = Signal(object)  # Emits C3DEvent
     trimRangeChanged = Signal(int, int)  # Emits (start_frame, end_frame)
+    displayModeChanged = Signal(str)  # Emits "frame" or "time"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +38,9 @@ class TimelineWidget(QWidget):
         self.point_rate: float = 100.0
         self.events: List[C3DEvent] = []
 
+        # Display mode: "frame" or "time" (default: "frame")
+        self.display_mode: str = "frame"
+
         # Trim / Cut range markers
         self.trim_start_frame: int = 0
         self.trim_end_frame: int = 99
@@ -47,11 +51,11 @@ class TimelineWidget(QWidget):
         self._trim_start_hovered: bool = False
         self._trim_end_hovered: bool = False
 
-        # Layout parameters
+        # Layout parameters (thinner, high-precision biomechanics handles)
         self.track_margin_x = 20
         self.track_height = 10
         self.track_y = 30
-        self.handle_width = 12
+        self.handle_width = 8   # Thinner handle thumb (reduced from 12px)
         self.handle_height = 24
 
         # Theme colors (adaptive to light/dark themes)
@@ -79,6 +83,18 @@ class TimelineWidget(QWidget):
             self._drag_mode = 'playhead'
         else:
             self._drag_mode = None
+
+    def set_display_mode(self, mode: str):
+        """Switch timeline ruler and readouts between 'frame' and 'time'."""
+        mode = mode.lower()
+        if mode in ("frame", "time") and mode != self.display_mode:
+            self.display_mode = mode
+            self.update()
+            self.displayModeChanged.emit(self.display_mode)
+
+    def toggle_display_mode(self):
+        """Toggle between 'frame' and 'time' display modes."""
+        self.set_display_mode("time" if self.display_mode == "frame" else "frame")
 
     def set_trial_data(self, total_frames: int, point_rate: float, events: List[C3DEvent]):
         """Update timeline with new trial information."""
@@ -163,8 +179,8 @@ class TimelineWidget(QWidget):
         curr_x = self._frame_to_x(self.current_frame)
         handle_y = track.center().y()
         return QRectF(
-            curr_x - self.handle_width / 2,
-            handle_y - self.handle_height / 2,
+            curr_x - self.handle_width / 2.0,
+            handle_y - self.handle_height / 2.0,
             self.handle_width,
             self.handle_height
         )
@@ -173,38 +189,42 @@ class TimelineWidget(QWidget):
         track = self._track_rect()
         x = self._frame_to_x(self.trim_start_frame)
         handle_y = track.center().y()
-        return QRectF(x - 9, handle_y - 13, 10, 26)
+        return QRectF(x - 3.5, handle_y - 13, 7, 26)
 
     def _trim_end_rect(self) -> QRectF:
         track = self._track_rect()
         x = self._frame_to_x(self.trim_end_frame)
         handle_y = track.center().y()
-        return QRectF(x - 1, handle_y - 13, 10, 26)
+        return QRectF(x - 3.5, handle_y - 13, 7, 26)
 
     def _is_on_handle(self, pos: QPointF) -> bool:
         rect = self._handle_rect()
-        hit_rect = rect.adjusted(-4, -4, 4, 4)
+        hit_rect = rect.adjusted(-6, -6, 6, 6)
         return hit_rect.contains(pos)
 
     def _is_on_trim_start(self, pos: QPointF) -> bool:
         rect = self._trim_start_rect()
-        hit_rect = rect.adjusted(-4, -4, 4, 4)
+        hit_rect = rect.adjusted(-6, -6, 6, 6)
         return hit_rect.contains(pos)
 
     def _is_on_trim_end(self, pos: QPointF) -> bool:
         rect = self._trim_end_rect()
-        hit_rect = rect.adjusted(-4, -4, 4, 4)
+        hit_rect = rect.adjusted(-6, -6, 6, 6)
         return hit_rect.contains(pos)
 
-    def _find_event_badge_at_pos(self, pos: QPointF) -> Optional[C3DEvent]:
+    def _find_event_badge_at_pos(self, pos: Union[QPoint, QPointF]) -> Optional[C3DEvent]:
         """Check if pos is specifically on an event marker badge at the top of the timeline."""
-        if pos.y() > 22:
+        if pos.y() > 24:
             return None
+        best_ev = None
+        best_dist = 12.0
         for ev in self.events:
             ev_x = self._frame_to_x(ev.frame)
-            if abs(ev_x - pos.x()) <= 8:
-                return ev
-        return None
+            dist = abs(ev_x - pos.x())
+            if dist <= best_dist:
+                best_dist = dist
+                best_ev = ev
+        return best_ev
 
     def _frame_to_x(self, frame: int) -> float:
         track = self._track_rect()
@@ -220,6 +240,120 @@ class TimelineWidget(QWidget):
         ratio = (x - track.left()) / track.width()
         ratio = max(0.0, min(1.0, ratio))
         return int(round(ratio * (self.total_frames - 1)))
+
+    def _draw_graduations(self, painter: QPainter, track: QRectF):
+        """Draw graduation ticks and numeric labels according to active display_mode (frame or time)."""
+        font = QFont(self.font())
+        font.setPointSize(9)
+        painter.setFont(font)
+        painter.setPen(self.tick_color)
+
+        track_w = track.width()
+        if track_w <= 0:
+            return
+
+        if self.display_mode == "frame":
+            # Target ~8-14 ticks across timeline width
+            target_ticks = max(4, min(14, int(track_w / 65)))
+            raw_step = max(1, self.total_frames / target_ticks)
+
+            candidates = [
+                1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500,
+                1000, 2000, 2500, 5000, 10000, 25000, 50000
+            ]
+            step_frames = candidates[-1]
+            for c in candidates:
+                if c >= raw_step:
+                    step_frames = c
+                    break
+
+            # Minor sub-ticks
+            sub_step = 0
+            if step_frames >= 5:
+                if step_frames % 5 == 0:
+                    sub_step = step_frames // 5
+                elif step_frames % 2 == 0:
+                    sub_step = step_frames // 2
+
+            if sub_step > 0:
+                sub_pen = QPen(self.tick_color, 0.8)
+                sub_pen.setColor(QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 90))
+                painter.setPen(sub_pen)
+                cur_sub = sub_step
+                while cur_sub <= self.total_frames:
+                    if cur_sub % step_frames != 0 and cur_sub > 1:
+                        xs = self._frame_to_x(cur_sub - 1)
+                        painter.drawLine(QPointF(xs, 17), QPointF(xs, 20))
+                    cur_sub += sub_step
+
+            # Major ticks and labels (starts from Frame 1)
+            painter.setPen(self.tick_color)
+            x_first = self._frame_to_x(0)
+            painter.drawLine(QPointF(x_first, 13), QPointF(x_first, 20))
+            lbl_rect = QRectF(x_first - 28, 0, 56, 14)
+            painter.drawText(lbl_rect, Qt.AlignCenter, "1")
+
+            cur_f = step_frames
+            while cur_f <= self.total_frames:
+                if cur_f > 1:
+                    x = self._frame_to_x(cur_f - 1)
+                    if x - x_first > 34:
+                        painter.drawLine(QPointF(x, 13), QPointF(x, 20))
+                        lbl_rect = QRectF(x - 28, 0, 56, 14)
+                        painter.drawText(lbl_rect, Qt.AlignCenter, f"{cur_f}")
+                cur_f += step_frames
+
+        else:  # "time" (seconds)
+            total_seconds = self.total_frames / self.point_rate if self.point_rate > 0 else 1.0
+            target_ticks = max(4, min(14, int(track_w / 75)))
+            raw_step_sec = total_seconds / target_ticks
+
+            candidates = [
+                0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0,
+                10.0, 20.0, 30.0, 60.0, 120.0, 300.0
+            ]
+            step_sec = candidates[-1]
+            for c in candidates:
+                if c >= raw_step_sec:
+                    step_sec = c
+                    break
+
+            # Minor sub-ticks
+            sub_sec = step_sec / 5.0 if step_sec >= 0.05 else (step_sec / 2.0)
+            if sub_sec * self.point_rate >= 1.0:
+                sub_pen = QPen(self.tick_color, 0.8)
+                sub_pen.setColor(QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 90))
+                painter.setPen(sub_pen)
+                t_sub = 0.0
+                while t_sub <= total_seconds + 1e-5:
+                    f_sub = int(round(t_sub * self.point_rate))
+                    if f_sub < self.total_frames:
+                        xs = self._frame_to_x(f_sub)
+                        painter.drawLine(QPointF(xs, 17), QPointF(xs, 20))
+                    t_sub += sub_sec
+
+            # Major ticks and labels
+            painter.setPen(self.tick_color)
+            t = 0.0
+            while t <= total_seconds + 1e-5:
+                f_major = int(round(t * self.point_rate))
+                if f_major >= self.total_frames:
+                    break
+                x = self._frame_to_x(f_major)
+                painter.drawLine(QPointF(x, 13), QPointF(x, 20))
+
+                if step_sec < 0.1:
+                    lbl = f"{t:.2f}s"
+                elif step_sec < 1.0:
+                    lbl = f"{t:.1f}s"
+                elif t.is_integer():
+                    lbl = f"{int(t)}s"
+                else:
+                    lbl = f"{t:.1f}s"
+
+                lbl_rect = QRectF(x - 28, 0, 56, 14)
+                painter.drawText(lbl_rect, Qt.AlignCenter, lbl)
+                t += step_sec
 
     def paintEvent(self, event: QPaintEvent):
         painter = QPainter(self)
@@ -238,34 +372,8 @@ class TimelineWidget(QWidget):
         painter.setBrush(self.bg_color)
         painter.drawRoundedRect(bg_rect, 4, 4)
 
-        # 2. Time & Frame graduation marks
-        font = QFont(self.font())
-        font.setPointSize(9)
-        painter.setFont(font)
-        painter.setPen(self.tick_color)
-
-        # Determine tick intervals based on total frames
-        total_seconds = self.total_frames / self.point_rate
-        if total_seconds > 20:
-            step_sec = 5.0
-        elif total_seconds > 5:
-            step_sec = 1.0
-        elif total_seconds > 2:
-            step_sec = 0.5
-        else:
-            step_sec = 0.2
-
-        step_frames = max(1, int(round(step_sec * self.point_rate)))
-        cur_f = 0
-        while cur_f < self.total_frames:
-            x = self._frame_to_x(cur_f)
-            t = cur_f / self.point_rate
-            # Tick mark
-            painter.drawLine(QPointF(x, 14), QPointF(x, 20))
-            # Text label
-            lbl = f"{t:.1f}s"
-            painter.drawText(QRectF(x - 25, 0, 50, 14), Qt.AlignCenter, lbl)
-            cur_f += step_frames
+        # 2. Graduation marks (Frame or Time)
+        self._draw_graduations(painter, track)
 
         # 3. Track Groove (Base + Active Cut Region)
         x_start = self._frame_to_x(self.trim_start_frame)
@@ -298,7 +406,7 @@ class TimelineWidget(QWidget):
             painter.setBrush(self.dim_color)
             painter.drawRect(dim_right)
 
-        # 4. Event Markers
+        # 5. Event Markers
         for ev in self.events:
             ev_x = self._frame_to_x(ev.frame)
             ev_color = QColor(ev.icon_color)
@@ -324,66 +432,95 @@ class TimelineWidget(QWidget):
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(QPointF(ev_x, 24), 6, 6)
 
-        # 5. Trim Start Handle [ (In Point)
+        # 6. Trim Start Handle [ (In Point) - Thinner, semi-transparent, with center hairline
         start_rect = self._trim_start_rect()
         is_start_act = self._trim_start_hovered or self._drag_mode == 'trim_start'
-        painter.setPen(QPen(QColor("#FFE082" if is_start_act else "#FFB74D"), 1.5))
-        painter.setBrush(QColor("#FFA726" if is_start_act else "#E69500"))
-        painter.drawRoundedRect(start_rect, 3, 3)
-        # Top pointer tab pointing right into active region
+        s_fill = QColor("#FFA726" if is_start_act else "#E69500")
+        s_fill.setAlpha(185 if is_start_act else 145)
+        painter.setPen(QPen(QColor("#FFE082" if is_start_act else "#FFB74D"), 1.2))
+        painter.setBrush(s_fill)
+        painter.drawRoundedRect(start_rect, 2.5, 2.5)
+
+        # Pointer tab pointing right into active region
         flag_s = QPolygonF([
-            QPointF(start_rect.right(), start_rect.top() - 3),
-            QPointF(start_rect.right() + 5, start_rect.top() + 3),
-            QPointF(start_rect.right(), start_rect.top() + 9)
+            QPointF(start_rect.right(), start_rect.top() - 2),
+            QPointF(start_rect.right() + 4, start_rect.top() + 3),
+            QPointF(start_rect.right(), start_rect.top() + 8)
         ])
         painter.drawPolygon(flag_s)
 
-        # 6. Trim End Handle ] (Out Point)
+        # Center vertical hairline down the exact frame position
+        painter.setPen(QPen(QColor("#FFF3E0" if is_start_act else "#FFE082"), 1.0))
+        painter.drawLine(QPointF(x_start, start_rect.top() + 1), QPointF(x_start, start_rect.bottom() - 1))
+        painter.drawLine(QPointF(x_start, track.top() - 2), QPointF(x_start, track.bottom() + 2))
+
+        # 7. Trim End Handle ] (Out Point) - Thinner, semi-transparent, with center hairline
         end_rect = self._trim_end_rect()
         is_end_act = self._trim_end_hovered or self._drag_mode == 'trim_end'
-        painter.setPen(QPen(QColor("#FFCCBC" if is_end_act else "#FF8A65"), 1.5))
-        painter.setBrush(QColor("#FF5722" if is_end_act else "#E64A19"))
-        painter.drawRoundedRect(end_rect, 3, 3)
-        # Top pointer tab pointing left into active region
+        e_fill = QColor("#FF5722" if is_end_act else "#E64A19")
+        e_fill.setAlpha(185 if is_end_act else 145)
+        painter.setPen(QPen(QColor("#FFCCBC" if is_end_act else "#FF8A65"), 1.2))
+        painter.setBrush(e_fill)
+        painter.drawRoundedRect(end_rect, 2.5, 2.5)
+
+        # Pointer tab pointing left into active region
         flag_e = QPolygonF([
-            QPointF(end_rect.left(), end_rect.top() - 3),
-            QPointF(end_rect.left() - 5, end_rect.top() + 3),
-            QPointF(end_rect.left(), end_rect.top() + 9)
+            QPointF(end_rect.left(), end_rect.top() - 2),
+            QPointF(end_rect.left() - 4, end_rect.top() + 3),
+            QPointF(end_rect.left(), end_rect.top() + 8)
         ])
         painter.drawPolygon(flag_e)
 
-        # 7. Playhead Scrubber Handle (Drawn on top)
+        # Center vertical hairline down the exact frame position
+        painter.setPen(QPen(QColor("#FBE9E7" if is_end_act else "#FFCCBC"), 1.0))
+        painter.drawLine(QPointF(x_end, end_rect.top() + 1), QPointF(x_end, end_rect.bottom() - 1))
+        painter.drawLine(QPointF(x_end, track.top() - 2), QPointF(x_end, track.bottom() + 2))
+
+        # 8. Playhead Scrubber Handle (Drawn on top) - Thinner, semi-transparent, with center frame hairline
         handle_x = curr_x
         handle_rect = self._handle_rect()
         is_active = (self._drag_mode == 'playhead' or self._handle_hovered)
-
-        # Scrubber vertical playhead line through the track
         playhead_col = self.accent_hover_color if is_active else self.accent_color
-        painter.setPen(QPen(playhead_col, 2))
-        painter.drawLine(QPointF(handle_x, track.top() - 2), QPointF(handle_x, track.bottom() + 2))
 
-        # Scrubber handle thumb
-        painter.setPen(QPen(playhead_col, 2))
-        painter.setBrush(self.handle_bg_color)
-        painter.drawRoundedRect(handle_rect, 4, 4)
+        # Scrubber vertical hairline extending through track and toward ruler ticks
+        hairline_pen = QPen(playhead_col, 1.2)
+        painter.setPen(hairline_pen)
+        painter.drawLine(QPointF(handle_x, 15), QPointF(handle_x, track.bottom() + 3))
 
-        # Scrubber inner detail line
-        painter.setPen(QPen(playhead_col, 2))
+        # Scrubber handle thumb - semi-transparent glass body
+        thumb_bg = QColor(self.handle_bg_color)
+        thumb_bg.setAlpha(185 if is_active else 145)
+        painter.setBrush(thumb_bg)
+        painter.setPen(QPen(playhead_col, 1.2))
+        painter.drawRoundedRect(handle_rect, 3, 3)
+
+        # Sharp vertical hairline right down the middle so user knows exactly which frame they are on
+        center_hairline_col = QColor("#FFFFFF") if is_active else (QColor("#00E5FF") if self.is_dark else QColor("#0284C7"))
+        painter.setPen(QPen(center_hairline_col, 1.0))
         painter.drawLine(
-            QPointF(handle_x, handle_rect.top() + 4),
-            QPointF(handle_x, handle_rect.bottom() - 4)
+            QPointF(handle_x, handle_rect.top() + 1),
+            QPointF(handle_x, handle_rect.bottom() - 1)
         )
 
-        # 9. Bottom frame / time readout with Cut/Trim info
-        painter.setPen(self.text_muted_color)
-        cur_t = self.current_frame / self.point_rate
+        # 9. Bottom frame / time readout with Cut/Trim info (Active format highlighted)
+        cur_t = self.current_frame / self.point_rate if self.point_rate > 0 else 0.0
+        total_seconds = self.total_frames / self.point_rate if self.point_rate > 0 else 1.0
         trim_len = self.trim_end_frame - self.trim_start_frame + 1
-        trim_sec = trim_len / self.point_rate
-        trim_str = f"  |  ✂ Cut: [{self.trim_start_frame}–{self.trim_end_frame}] ({trim_len} f, {trim_sec:.3f}s)" if is_trimmed else ""
-        left_text = f"Frame: {self.current_frame} / {self.total_frames - 1}{trim_str}"
+        trim_sec = trim_len / self.point_rate if self.point_rate > 0 else 0.0
+        trim_str = f"  |  ✂ Cut: [{self.trim_start_frame + 1}–{self.trim_end_frame + 1}] ({trim_len} f, {trim_sec:.3f}s)" if is_trimmed else ""
+        left_text = f"Frame: {self.current_frame + 1} / {self.total_frames}{trim_str}"
         right_text = f"Time: {cur_t:.3f} s / {total_seconds:.3f} s"
-        painter.drawText(QRectF(track.left(), track.bottom() + 6, 450, 14), Qt.AlignLeft, left_text)
-        painter.drawText(QRectF(track.right() - 200, track.bottom() + 6, 200, 14), Qt.AlignRight, right_text)
+
+        if self.display_mode == "frame":
+            painter.setPen(self.accent_color)
+            painter.drawText(QRectF(track.left(), track.bottom() + 6, 450, 14), Qt.AlignLeft, left_text)
+            painter.setPen(self.text_muted_color)
+            painter.drawText(QRectF(track.right() - 200, track.bottom() + 6, 200, 14), Qt.AlignRight, right_text)
+        else:
+            painter.setPen(self.text_muted_color)
+            painter.drawText(QRectF(track.left(), track.bottom() + 6, 450, 14), Qt.AlignLeft, left_text)
+            painter.setPen(self.accent_color)
+            painter.drawText(QRectF(track.right() - 200, track.bottom() + 6, 200, 14), Qt.AlignRight, right_text)
 
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.LeftButton:
@@ -428,6 +565,13 @@ class TimelineWidget(QWidget):
             self.set_current_frame(new_frame)
             self.frameChanged.emit(self.current_frame)
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        """Double clicking toggles display mode between Frame and Time."""
+        if event.button() == Qt.LeftButton:
+            self.toggle_display_mode()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mouseMoveEvent(self, event: QMouseEvent):
         pos = event.position()
         pos_x = pos.x()
@@ -436,30 +580,46 @@ class TimelineWidget(QWidget):
             new_frame = self._x_to_frame(pos_x)
             self.set_current_frame(new_frame)
             self.frameChanged.emit(self.current_frame)
+            cur_t = self.current_frame / self.point_rate if self.point_rate > 0 else 0.0
+            if self.display_mode == "frame":
+                tip = f"<b>Frame: {self.current_frame + 1}</b><br>{cur_t:.3f} s"
+            else:
+                tip = f"<b>Time: {cur_t:.3f} s</b><br>Frame: {self.current_frame + 1}"
+            QToolTip.showText(event.globalPosition().toPoint(), tip, self)
         elif self._drag_mode == 'trim_start':
             new_frame = self._x_to_frame(pos_x)
+            for ev in self.events:
+                ev_x = self._frame_to_x(ev.frame)
+                if abs(ev_x - pos_x) <= 8:
+                    new_frame = ev.frame
+                    break
             new_frame = max(0, min(self.trim_end_frame - 1, new_frame))
             if new_frame != self.trim_start_frame:
                 self.trim_start_frame = new_frame
                 self.trimRangeChanged.emit(self.trim_start_frame, self.trim_end_frame)
                 self.update()
-            t_val = self.trim_start_frame / self.point_rate
+            t_val = self.trim_start_frame / self.point_rate if self.point_rate > 0 else 0.0
             QToolTip.showText(
                 event.globalPosition().toPoint(),
-                f"<b>Trim Start (In Point) [</b><br>Frame: {self.trim_start_frame}<br>Time: {t_val:.3f} s",
+                f"<b>Trim Start (In Point) [</b><br>Frame: {self.trim_start_frame + 1}<br>Time: {t_val:.3f} s",
                 self
             )
         elif self._drag_mode == 'trim_end':
             new_frame = self._x_to_frame(pos_x)
+            for ev in self.events:
+                ev_x = self._frame_to_x(ev.frame)
+                if abs(ev_x - pos_x) <= 8:
+                    new_frame = ev.frame
+                    break
             new_frame = max(self.trim_start_frame + 1, min(self.total_frames - 1, new_frame))
             if new_frame != self.trim_end_frame:
                 self.trim_end_frame = new_frame
                 self.trimRangeChanged.emit(self.trim_start_frame, self.trim_end_frame)
                 self.update()
-            t_val = self.trim_end_frame / self.point_rate
+            t_val = self.trim_end_frame / self.point_rate if self.point_rate > 0 else 0.0
             QToolTip.showText(
                 event.globalPosition().toPoint(),
-                f"<b>Trim End (Out Point) ]</b><br>Frame: {self.trim_end_frame}<br>Time: {t_val:.3f} s",
+                f"<b>Trim End (Out Point) ]</b><br>Frame: {self.trim_end_frame + 1}<br>Time: {t_val:.3f} s",
                 self
             )
         else:
@@ -485,16 +645,22 @@ class TimelineWidget(QWidget):
                 if self._hovered_event is not None:
                     self._hovered_event = None
                     self.update()
-                QToolTip.showText(event.globalPosition().toPoint(), f"Playhead: Frame {self.current_frame}", self)
+                cur_t = self.current_frame / self.point_rate if self.point_rate > 0 else 0.0
+                total_t = self.total_frames / self.point_rate if self.point_rate > 0 else 0.0
+                if self.display_mode == "frame":
+                    tip_txt = f"<b>Playhead</b><br>Frame: {self.current_frame + 1} / {self.total_frames}<br>Time: {cur_t:.3f} s / {total_t:.3f} s"
+                else:
+                    tip_txt = f"<b>Playhead</b><br>Time: {cur_t:.3f} s / {total_t:.3f} s<br>Frame: {self.current_frame + 1} / {self.total_frames}"
+                QToolTip.showText(event.globalPosition().toPoint(), tip_txt, self)
             elif on_trim_start:
                 self.setCursor(Qt.SizeHorCursor)
                 if self._hovered_event is not None:
                     self._hovered_event = None
                     self.update()
-                t_val = self.trim_start_frame / self.point_rate
+                t_val = self.trim_start_frame / self.point_rate if self.point_rate > 0 else 0.0
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
-                    f"<b>Trim Start Handle [</b><br>Frame: {self.trim_start_frame} ({t_val:.3f}s)<br><i>Drag to adjust cut start</i>",
+                    f"<b>Trim Start Handle [</b><br>Frame: {self.trim_start_frame + 1} ({t_val:.3f}s)<br><i>Drag to adjust cut start</i>",
                     self
                 )
             elif on_trim_end:
@@ -502,10 +668,10 @@ class TimelineWidget(QWidget):
                 if self._hovered_event is not None:
                     self._hovered_event = None
                     self.update()
-                t_val = self.trim_end_frame / self.point_rate
+                t_val = self.trim_end_frame / self.point_rate if self.point_rate > 0 else 0.0
                 QToolTip.showText(
                     event.globalPosition().toPoint(),
-                    f"<b>Trim End Handle ]</b><br>Frame: {self.trim_end_frame} ({t_val:.3f}s)<br><i>Drag to adjust cut end</i>",
+                    f"<b>Trim End Handle ]</b><br>Frame: {self.trim_end_frame + 1} ({t_val:.3f}s)<br><i>Drag to adjust cut end</i>",
                     self
                 )
             else:
@@ -521,7 +687,7 @@ class TimelineWidget(QWidget):
                     ctx_str = f" [{ev.context}]" if ev.context else ""
                     QToolTip.showText(
                         event.globalPosition().toPoint(),
-                        f"<b>{ev.name}</b>{ctx_str}<br>Time: {t_str}<br>Frame: {ev.frame}",
+                        f"<b>{ev.name}</b>{ctx_str}<br>Time: {t_str}<br>Frame: {ev.frame + 1}",
                         self
                     )
                 else:
@@ -571,57 +737,80 @@ class TimelineWidget(QWidget):
         super().leaveEvent(event)
 
     def _find_event_at_x(self, x: float) -> Optional[C3DEvent]:
-        """Find event near the given x coordinate (within 8 pixels)."""
+        """Find event closest to the given x coordinate (within 12 pixels)."""
+        best_ev = None
+        best_dist = 12.0
         for ev in self.events:
             ev_x = self._frame_to_x(ev.frame)
-            if abs(ev_x - x) <= 8:
-                return ev
-        return None
+            dist = abs(ev_x - x)
+            if dist <= best_dist:
+                best_dist = dist
+                best_ev = ev
+        return best_ev
 
-    def contextMenuEvent(self, event):
-        """Right-click context menu to add, edit, or remove events and manage trim markers."""
-        pos_x = event.pos().x()
+    def create_context_menu(self, pos: Union[QPoint, QPointF]) -> QMenu:
+        """Construct the context menu for a given position on the timeline."""
+        pos_x = pos.x()
         click_frame = self._x_to_frame(pos_x)
-        clicked_ev = self._find_event_at_x(pos_x)
+        # Prioritize event directly under click coordinates (badge or track vertical line)
+        clicked_ev = self._find_event_badge_at_pos(pos) or self._find_event_at_x(pos_x) or self._hovered_event
 
         menu = QMenu(self)
         if clicked_ev:
             act_edit = menu.addAction(f"Edit Event '{clicked_ev.display_name}'...")
-            act_edit.triggered.connect(lambda: self.editEventRequested.emit(clicked_ev))
+            act_edit.triggered.connect(lambda checked=False, ev=clicked_ev: self.editEventRequested.emit(ev))
 
             act_del = menu.addAction(f"Delete Event '{clicked_ev.display_name}'")
-            act_del.triggered.connect(lambda: self.deleteEventRequested.emit(clicked_ev))
+            act_del.triggered.connect(lambda checked=False, ev=clicked_ev: self.deleteEventRequested.emit(ev))
 
-            act_jump = menu.addAction(f"Jump to Event Frame ({clicked_ev.frame})")
-            act_jump.triggered.connect(lambda: (self.set_current_frame(clicked_ev.frame), self.frameChanged.emit(clicked_ev.frame)))
+            act_jump = menu.addAction(f"Jump to Event Frame ({clicked_ev.frame + 1})")
+            act_jump.triggered.connect(lambda checked=False, f=clicked_ev.frame: (self.set_current_frame(f), self.frameChanged.emit(f)))
 
             menu.addSeparator()
 
         t_val = click_frame / self.point_rate if self.point_rate > 0 else 0.0
-        act_add_here = menu.addAction(f"Add Event at Frame {click_frame} ({t_val:.3f} s)...")
-        act_add_here.triggered.connect(lambda: self.addEventRequested.emit(click_frame))
+        act_add_here = menu.addAction(f"Add Event at Frame {click_frame + 1} ({t_val:.3f} s)...")
+        act_add_here.triggered.connect(lambda checked=False, f=click_frame: self.addEventRequested.emit(f))
 
         if self.current_frame != click_frame:
             cur_t = self.current_frame / self.point_rate if self.point_rate > 0 else 0.0
-            act_add_playhead = menu.addAction(f"Add Event at Playhead (Frame {self.current_frame}, {cur_t:.3f} s)...")
-            act_add_playhead.triggered.connect(lambda: self.addEventRequested.emit(self.current_frame))
+            act_add_playhead = menu.addAction(f"Add Event at Playhead (Frame {self.current_frame + 1}, {cur_t:.3f} s)...")
+            act_add_playhead.triggered.connect(lambda checked=False, f=self.current_frame: self.addEventRequested.emit(f))
 
-        # Trim / Cut range options
+        # Timeline Display Units (Frame vs Time)
         menu.addSeparator()
-        act_trim_in = menu.addAction(f"Set Trim Start Here [ (Frame {click_frame})")
-        act_trim_in.triggered.connect(lambda: self.set_trim_range(click_frame, max(click_frame, self.trim_end_frame)))
+        act_unit_frame = menu.addAction("Show Units in Frames")
+        act_unit_frame.setCheckable(True)
+        act_unit_frame.setChecked(self.display_mode == "frame")
+        act_unit_frame.triggered.connect(lambda: self.set_display_mode("frame"))
 
-        act_trim_out = menu.addAction(f"Set Trim End Here ] (Frame {click_frame})")
-        act_trim_out.triggered.connect(lambda: self.set_trim_range(min(click_frame, self.trim_start_frame), click_frame))
+        act_unit_time = menu.addAction("Show Units in Time (seconds)")
+        act_unit_time.setCheckable(True)
+        act_unit_time.setChecked(self.display_mode == "time")
+        act_unit_time.triggered.connect(lambda: self.set_display_mode("time"))
+
+        # Trim / Cut range options (matches clicked event exact frame if clicking on an event)
+        menu.addSeparator()
+        trim_target_frame = clicked_ev.frame if clicked_ev is not None else click_frame
+        act_trim_in = menu.addAction(f"Set Trim Start Here [ (Frame {trim_target_frame + 1})")
+        act_trim_in.triggered.connect(lambda checked=False, f=trim_target_frame: self.set_trim_range(f, max(f, self.trim_end_frame)))
+
+        act_trim_out = menu.addAction(f"Set Trim End Here ] (Frame {trim_target_frame + 1})")
+        act_trim_out.triggered.connect(lambda checked=False, f=trim_target_frame: self.set_trim_range(min(f, self.trim_start_frame), f))
 
         if self.trim_start_frame > 0 or self.trim_end_frame < self.total_frames - 1:
-            act_reset_trim = menu.addAction(f"Reset Trim Range to Full (0–{self.total_frames - 1})")
+            act_reset_trim = menu.addAction(f"Reset Trim Range to Full (1–{self.total_frames})")
             act_reset_trim.triggered.connect(self.reset_trim_range)
 
+        return menu
+
+    def contextMenuEvent(self, event):
+        """Right-click context menu to add, edit, or remove events, switch units, and manage trim markers."""
+        menu = self.create_context_menu(event.pos())
         menu.exec(event.globalPos())
 
     def keyPressEvent(self, event):
-        """Keyboard navigation: Arrow keys, Home/End, and I/O for Trim In/Out."""
+        """Keyboard navigation: Arrow keys, Home/End, I/O for Trim In/Out, and U to toggle Units."""
         if event.key() == Qt.Key_Left:
             self.set_current_frame(self.current_frame - 1)
             self.frameChanged.emit(self.current_frame)
@@ -638,6 +827,8 @@ class TimelineWidget(QWidget):
             self.set_trim_start_here()
         elif event.key() == Qt.Key_O:
             self.set_trim_end_here()
+        elif event.key() == Qt.Key_U:
+            self.toggle_display_mode()
         elif event.key() == Qt.Key_R and (event.modifiers() & Qt.AltModifier):
             self.reset_trim_range()
         else:

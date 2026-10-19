@@ -264,14 +264,14 @@ class Viewer3D(QWidget):
         self._build_global_axes()
 
         # 3. Markers Scatter Plot Item
-        # Highest depthValue and GL_DEPTH_TEST: False ensures markers are ALWAYS visible on top of plates!
+        # High depthValue (200) ensures markers are rendered AFTER force plates and stay 100% opaque
         self.marker_scatter = gl.GLScatterPlotItem(
             pos=np.zeros((1, 3)),
             color=self.marker_color,
             size=self.marker_size,
             pxMode=True
         )
-        self.marker_scatter.setDepthValue(100)
+        self.marker_scatter.setDepthValue(200)
         self.marker_scatter.setGLOptions({
             'glBlendFunc': (GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA),
             GL.GL_DEPTH_TEST: False,
@@ -282,18 +282,18 @@ class Viewer3D(QWidget):
         # 4. Measurement Overlay Items (lines and text labels)
         self.meas_line1 = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(1.0, 0.85, 0.0, 1.0), width=2.0)
         self.meas_line1.setGLOptions('opaque')
-        self.meas_line1.setDepthValue(50)
+        self.meas_line1.setDepthValue(180)
         self.meas_line1.setVisible(False)
         self.gl_view.addItem(self.meas_line1)
 
         self.meas_line2 = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(1.0, 0.85, 0.0, 1.0), width=2.0)
         self.meas_line2.setGLOptions('opaque')
-        self.meas_line2.setDepthValue(50)
+        self.meas_line2.setDepthValue(180)
         self.meas_line2.setVisible(False)
         self.gl_view.addItem(self.meas_line2)
 
         self.meas_label = gl.GLTextItem(pos=[0, 0, 0], text="", color=(1.0, 0.9, 0.1, 1.0), font=QFont("Arial", 13, QFont.Bold))
-        self.meas_label.setDepthValue(60)
+        self.meas_label.setDepthValue(185)
         self.meas_label.setVisible(False)
         self.gl_view.addItem(self.meas_label)
 
@@ -602,7 +602,7 @@ class Viewer3D(QWidget):
                 smooth=False
             )
             mesh.setGLOptions('translucent')
-            mesh.setDepthValue(150)  # Rendered after opaque axes and markers so both sides and vertical axis remain visible
+            mesh.setDepthValue(30)  # Rendered after plate local axes (5) so axes remain visible through translucent surface
             mesh.setVisible(self.show_force_plates)
             self.gl_view.addItem(mesh)
             self.plate_mesh_items.append(mesh)
@@ -617,7 +617,7 @@ class Viewer3D(QWidget):
                 mode='line_strip'
             )
             border_line.setGLOptions('opaque')
-            border_line.setDepthValue(155)
+            border_line.setDepthValue(35)
             border_line.setVisible(self.show_force_plates)
             self.gl_view.addItem(border_line)
             self.plate_mesh_items.append(border_line)
@@ -724,7 +724,7 @@ class Viewer3D(QWidget):
 
             lbl_fp = gl.GLImageItem(img_data, glOptions='translucent')
             lbl_fp.setTransform(m)
-            lbl_fp.setDepthValue(160)
+            lbl_fp.setDepthValue(40)
             lbl_fp.setVisible(self.show_force_plates)
             # Retain text and color properties for API compatibility and tests
             lbl_fp.text = label_text
@@ -748,7 +748,7 @@ class Viewer3D(QWidget):
                 width=2.0
             )
             grf_line.setGLOptions('opaque')
-            grf_line.setDepthValue(20)
+            grf_line.setDepthValue(60)
             grf_line.setVisible(False)
             self.gl_view.addItem(grf_line)
             self.grf_vector_items.append(grf_line)
@@ -762,7 +762,7 @@ class Viewer3D(QWidget):
                 drawEdges=False
             )
             grf_shaft.setGLOptions('opaque')
-            grf_shaft.setDepthValue(22)
+            grf_shaft.setDepthValue(62)
             grf_shaft.setVisible(False)
             self.gl_view.addItem(grf_shaft)
             self.grf_shaft_items.append(grf_shaft)
@@ -776,7 +776,7 @@ class Viewer3D(QWidget):
                 drawEdges=False
             )
             grf_cone.setGLOptions('opaque')
-            grf_cone.setDepthValue(25)
+            grf_cone.setDepthValue(65)
             grf_cone.setVisible(False)
             self.gl_view.addItem(grf_cone)
             self.grf_cone_items.append(grf_cone)
@@ -1048,7 +1048,7 @@ class Viewer3D(QWidget):
                         color=(1.0, 0.88, 0.1, 1.0),
                         font=lbl_font
                     )
-                    txt_item.setDepthValue(80)
+                    txt_item.setDepthValue(210)
                     self.gl_view.addItem(txt_item)
                     self.selected_marker_labels[name] = txt_item
                 else:

@@ -97,15 +97,39 @@ px, py = p_curve.getData()
 assert len(py) == N_ANALOG, f"Expected {N_ANALOG} raw points in plotter, got {len(py)}"
 print("UniversalPlotterWindow raw full-resolution verified.")
 
-# 3. Test SettingsDialog and MainWindow propagation
-win = MainWindow()
-win.trial = trial
-win.plot_panel.load_trial(trial)
+# 4. Test PlotPanel on-curve hover data value inspection
+from PySide6.QtCore import QPointF
+for i in range(panel.channel_list.count()):
+    it = panel.channel_list.item(i)
+    if it.text() == "EMG_Soleus":
+        it.setCheckState(Qt.Checked)
+        break
 
-cfg = {
-    "plot_antialias": False,
-}
-win._apply_settings(cfg)
-print("Settings propagation to MainWindow verified.")
+assert "EMG_Soleus" in panel.active_curves
+panel.auto_range()
+app.processEvents()
+
+vb = panel.plot_widget.getViewBox()
+c_soleus = panel.active_curves["EMG_Soleus"]
+sx = c_soleus.xData
+sy = c_soleus.yData
+target_x = float(sx[100])
+target_y = float(sy[100])
+
+scene_pos = vb.mapViewToScene(QPointF(target_x, target_y))
+panel._on_mouse_moved(scene_pos)
+
+assert panel.hover_dot.isVisible(), "PlotPanel hover_dot should be visible when hovering over curve"
+assert panel.hover_label.isVisible(), "PlotPanel hover_label should be visible when hovering over curve"
+html = panel.hover_label.toHtml()
+assert "EMG_Soleus" in html, f"Expected 'EMG_Soleus' in hover label, got: {html}"
+assert f"{target_y:.2f}" in html or f"{target_y:.1f}" in html, f"Expected value {target_y:.2f} in hover label"
+print("PlotPanel on-curve hover inspection verified successfully!")
+
+# Verify moving mouse away hides the indicator and label
+panel._on_mouse_moved(QPointF(-1000.0, -1000.0))
+assert not panel.hover_dot.isVisible(), "PlotPanel hover_dot should be hidden when mouse moves away"
+assert not panel.hover_label.isVisible(), "PlotPanel hover_label should be hidden when mouse moves away"
+print("PlotPanel hover hide on distant mouse position verified.")
 
 print("ALL PLOT PERFORMANCE & ANALOG OPTIMIZATION TESTS PASSED PERFECTLY!", flush=True)

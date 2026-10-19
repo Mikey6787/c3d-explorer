@@ -17,6 +17,38 @@ class C3DEvent:
     event_id: int = 0    # Event ID
     icon_color: str = "#FF9800"
 
+    def __post_init__(self):
+        self.name = str(self.name) if self.name is not None else ""
+        try:
+            self.time = float(self.time)
+        except (ValueError, TypeError):
+            self.time = 0.0
+        try:
+            self.frame = int(round(float(self.frame)))
+        except (ValueError, TypeError):
+            self.frame = 0
+        self.subject = str(self.subject) if self.subject is not None else ""
+        self.context = str(self.context) if self.context is not None else ""
+        self.description = str(self.description) if self.description is not None else ""
+        try:
+            self.event_id = int(self.event_id)
+        except (ValueError, TypeError):
+            self.event_id = 0
+        self.icon_color = str(self.icon_color) if self.icon_color is not None else "#FF9800"
+
+    def clone(self) -> "C3DEvent":
+        """Return a clean, independent copy of this event."""
+        return C3DEvent(
+            name=self.name,
+            time=self.time,
+            frame=self.frame,
+            subject=self.subject,
+            context=self.context,
+            description=self.description,
+            event_id=self.event_id,
+            icon_color=self.icon_color
+        )
+
     @property
     def display_name(self) -> str:
         if self.context and not self.name.startswith(self.context):

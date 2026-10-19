@@ -2,13 +2,13 @@
 
 from typing import Dict, List, Optional, Tuple
 import numpy as np
-from PySide6.QtCore import Qt, Signal, QPoint
+from PySide6.QtCore import Qt, Signal, QPoint, QEvent
 from PySide6.QtGui import QColor, QBrush, QIcon, QPixmap, QPainter, QPen, QAction
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget,
     QTableWidgetItem, QHeaderView, QLineEdit, QPushButton, QLabel,
     QFrame, QScrollArea, QGroupBox, QMenu, QColorDialog, QInputDialog,
-    QMessageBox, QAbstractItemView
+    QMessageBox, QAbstractItemView, QStyle, QStyleOptionViewItem, QToolTip
 )
 
 from core.data_models import C3DTrial, ForcePlatformData, C3DEvent
@@ -60,6 +60,8 @@ class SidePanel(QWidget):
         self.default_marker_color: QColor = QColor("#FFFFFF")
         self.is_dark: bool = True
         self.current_theme_dict: Optional[dict] = None
+        self._icon_press_marker: Optional[str] = None
+        self._hovered_marker_icon: Optional[str] = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -133,6 +135,10 @@ class SidePanel(QWidget):
             else:
                 old_markers_key(event)
         self.markers_table.keyPressEvent = _on_markers_key_press
+
+        self.markers_table.setMouseTracking(True)
+        self.markers_table.viewport().setMouseTracking(True)
+        self.markers_table.viewport().installEventFilter(self)
 
         layout.addWidget(self.markers_table)
 
@@ -412,7 +418,7 @@ class SidePanel(QWidget):
         self.events_table.setRowCount(len(self.trial.events))
         for row, ev in enumerate(self.trial.events):
             name_item = QTableWidgetItem(ev.name)
-            name_item.setToolTip(f"Event: {ev.name}\nContext: {ev.context}\nTime: {ev.time:.3f} s\nFrame: {ev.frame}")
+            name_item.setToolTip(f"Event: {ev.name}\nContext: {ev.context}\nTime: {ev.time:.3f} s\nFrame: {ev.frame + 1}")
             name_item.setForeground(QBrush(QColor(ev.icon_color)))
             name_item.setData(Qt.UserRole, ev)
             self.events_table.setItem(row, 0, name_item)
@@ -421,7 +427,7 @@ class SidePanel(QWidget):
             time_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.events_table.setItem(row, 1, time_item)
 
-            frame_item = QTableWidgetItem(str(ev.frame))
+            frame_item = QTableWidgetItem(str(ev.frame + 1))
             frame_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.events_table.setItem(row, 2, frame_item)
 
@@ -712,18 +718,103 @@ class SidePanel(QWidget):
             self.rename_marker_entry(cur_name, new_name)
             self.markerRenamed.emit(cur_name, new_name)
 
-    def _action_change_marker_color(self):
-        selected = self.get_selected_markers()
+    def _get_marker_icon_hit(self, pos: QPoint) -> Optional[Tuple[QTableWidgetItem, str]]:
+        item = self.markers_table.itemAt(pos)
+        if not item or item.column() != 0:
+            return None
+        if item.icon().isNull():
+            return None
+        opt = QStyleOptionViewItem()
+        self.markers_table.initViewItemOption(opt)
+        opt.rect = self.markers_table.visualItemRect(item)
+        if not opt.rect.isValid():
+            return None
+        opt.features |= QStyleOptionViewItem.HasDecoration | QStyleOptionViewItem.HasCheckIndicator
+        icon_rect = self.markers_table.style().subElementRect(
+            QStyle.SE_ItemViewItemDecoration, opt, self.markers_table
+        )
+        if icon_rect.isEmpty():
+            return None
+        hit_rect = icon_rect.adjusted(-2, -2, 2, 2)
+        if hit_rect.contains(pos):
+            name = item.data(Qt.UserRole) or item.text()
+            return item, name
+        return None
+
+    def eventFilter(self, watched, event):
+        try:
+            if hasattr(self, 'markers_table') and watched is self.markers_table.viewport():
+                t = event.type()
+                if t == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                    pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                    hit = self._get_marker_icon_hit(pos)
+                    if hit:
+                        self._icon_press_marker = hit[1]
+                        return True
+                elif t == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                    if getattr(self, '_icon_press_marker', None) is not None:
+                        marker = self._icon_press_marker
+                        self._icon_press_marker = None
+                        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                        hit = self._get_marker_icon_hit(pos)
+                        if hit and hit[1] == marker:
+                            self._action_change_marker_color_for(marker)
+                        return True
+                elif t == QEvent.MouseButtonDblClick and event.button() == Qt.LeftButton:
+                    pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                    if self._get_marker_icon_hit(pos):
+                        return True
+                elif t == QEvent.MouseMove:
+                    pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+                    hit = self._get_marker_icon_hit(pos)
+                    if hit:
+                        self.markers_table.viewport().setCursor(Qt.PointingHandCursor)
+                        if self._hovered_marker_icon != hit[1]:
+                            self._hovered_marker_icon = hit[1]
+                            global_pos = (
+                                event.globalPosition().toPoint()
+                                if hasattr(event, "globalPosition")
+                                else event.globalPos()
+                            )
+                            QToolTip.showText(
+                                global_pos,
+                                f"Click to change color for marker '{hit[1]}'",
+                                self.markers_table.viewport(),
+                            )
+                    else:
+                        self._hovered_marker_icon = None
+                        if self.markers_table.viewport().cursor().shape() == Qt.PointingHandCursor:
+                            self.markers_table.viewport().unsetCursor()
+                            QToolTip.hideText()
+                elif t == QEvent.Leave:
+                    self._hovered_marker_icon = None
+                    if self.markers_table.viewport().cursor().shape() == Qt.PointingHandCursor:
+                        self.markers_table.viewport().unsetCursor()
+                        QToolTip.hideText()
+        except RuntimeError:
+            pass
+        return super().eventFilter(watched, event)
+
+    def _action_change_marker_color(self, marker_names: Optional[List[str]] = None):
+        if marker_names is not None and isinstance(marker_names, (list, tuple, set)):
+            selected = list(marker_names)
+        else:
+            selected = self.get_selected_markers()
+            if not selected:
+                single = self.get_selected_marker()
+                if single:
+                    selected = [single]
+
         if not selected:
             QMessageBox.information(self, "Change Color", "Please select at least one marker to change its color.")
             return
 
         count = len(selected)
         if count == 1:
-            initial_col = self.marker_colors.get(selected[0], QColor("#FFFFFF"))
+            initial_col = self.marker_colors.get(selected[0], self.default_marker_color)
             title = f"Select Color for Marker '{selected[0]}'"
         else:
-            initial_col = self.marker_colors.get(selected[0], QColor("#FFFFFF"))
+            initial_col = self.marker_colors.get(selected[0], self.default_marker_color)
             title = f"Select Color for {count} Selected Markers"
 
         color = QColorDialog.getColor(initial_col, self, title)
@@ -732,6 +823,15 @@ class SidePanel(QWidget):
             self.markersColorChanged.emit(selected, color)
             for name in selected:
                 self.markerColorChanged.emit(name, color)
+
+    def _action_change_marker_color_for(self, marker_name: str):
+        selected = self.get_selected_markers()
+        if marker_name in selected and len(selected) > 1:
+            targets = selected
+        else:
+            targets = [marker_name]
+            self.select_markers([marker_name], emit_signal=True)
+        self._action_change_marker_color(targets)
 
     def _action_reset_marker_color(self):
         selected = self.get_selected_markers()
