@@ -44,7 +44,8 @@ class UniversalPlotterWindow(QMainWindow):
     - Custom signals (distances, angles)
     Supports switching between Time (s) and Frame index on the horizontal axis.
     """
-    timeCursorMoved = Signal(float)  # Emitted when user drags cursor on plot
+    timeCursorMoved = Signal(float)       # Emitted when user drags cursor on plot
+    trimRangeChanged = Signal(int, int)   # Emitted when user drags ROI bounds on plot
 
     def __init__(self, trial: Optional[C3DTrial] = None, current_frame: int = 0, parent=None):
         super().__init__(parent)
@@ -54,6 +55,8 @@ class UniversalPlotterWindow(QMainWindow):
         self.trial: Optional[C3DTrial] = trial
         self.current_frame: int = current_frame
         self.x_axis_mode: str = "time"  # "time" or "frame"
+        self.trim_range: Optional[Tuple[int, int]] = None
+        self.roi_region: Optional[pg.LinearRegionItem] = None
 
         # Signal storage: item_id -> {"x": np.ndarray, "y": np.ndarray, "label": str, "unit": str, "rate": float, "subsamples": int}
         self.active_curves: Dict[str, pg.PlotDataItem] = {}
@@ -90,6 +93,11 @@ class UniversalPlotterWindow(QMainWindow):
 
         top_bar.addSpacing(16)
 
+        btn_fit_roi = QPushButton("Fit ROI")
+        btn_fit_roi.setToolTip("Auto-fit horizontal zoom to trimmed Region of Interest (ROI)")
+        btn_fit_roi.clicked.connect(self.fit_roi)
+        top_bar.addWidget(btn_fit_roi)
+
         btn_fit = QPushButton("Auto Range / Fit")
         btn_fit.clicked.connect(self.auto_range)
         top_bar.addWidget(btn_fit)
@@ -97,6 +105,14 @@ class UniversalPlotterWindow(QMainWindow):
         btn_clear = QPushButton("Clear All Curves")
         btn_clear.clicked.connect(self.clear_all_curves)
         top_bar.addWidget(btn_clear)
+
+        top_bar.addSpacing(8)
+        self.lbl_roi_status = QLabel("ROI: Full Trial")
+        self.lbl_roi_status.setStyleSheet(
+            "background: #1E2433; border: 1px solid #333F54; border-radius: 10px; "
+            "padding: 3px 8px; color: #94A3B8; font-size: 11px;"
+        )
+        top_bar.addWidget(self.lbl_roi_status)
 
         top_bar.addStretch()
 
@@ -142,7 +158,7 @@ class UniversalPlotterWindow(QMainWindow):
         self.plot_widget.showGrid(x=True, y=True, alpha=0.25)
         self.plot_widget.setLabel("bottom", "Time", units="s")
         self.plot_widget.setLabel("left", "Value / Amplitude")
-        self.plot_widget.addLegend(offset=(10, 10))
+        self.plot_widget.addLegend(offset=(-20, 20))
 
         # Vertical Synchronized Time / Frame Cursor
         self.time_cursor = pg.InfiniteLine(
@@ -346,6 +362,16 @@ class UniversalPlotterWindow(QMainWindow):
                 rate = self.trial.analog_rate
                 subsamples = max(1, self.trial.analog_subsamples)
 
+        elif kind == "distance":
+            m1, m2 = role_data[1], role_data[2]
+            if len(role_data) > 3 and role_data[3] is not None:
+                y_data = role_data[3]
+            elif self.trial and m1 in self.trial.markers and m2 in self.trial.markers:
+                from gui.marker_tools_dialog import compute_distance_trajectory
+                y_data = compute_distance_trajectory(self.trial.markers[m1], self.trial.markers[m2])
+            rate = self.trial.point_rate if self.trial and self.trial.point_rate > 0 else 100.0
+            subsamples = 1
+
         if y_data is None:
             return
 
@@ -358,8 +384,22 @@ class UniversalPlotterWindow(QMainWindow):
 
         # Assign color
         if label not in self.color_map:
-            self.color_map[label] = PLOT_COLORS[self._next_color_idx % len(PLOT_COLORS)]
-            self._next_color_idx += 1
+            if kind == "marker" and len(role_data) > 3 and role_data[3] in ("X", "Y", "Z", "3D Norm"):
+                comp_name = role_data[3]
+                is_dark = getattr(self, "is_dark", True)
+                if comp_name == "X":
+                    self.color_map[label] = "#FF5252" if is_dark else "#EF4444"
+                elif comp_name == "Y":
+                    self.color_map[label] = "#00E676" if is_dark else "#16A34A"
+                elif comp_name == "Z":
+                    self.color_map[label] = "#40C4FF" if is_dark else "#0284C7"
+                else:
+                    self.color_map[label] = "#FFD740" if is_dark else "#D97706"
+            elif kind == "distance":
+                self.color_map[label] = "#E040FB" if getattr(self, "is_dark", True) else "#A855F7"
+            else:
+                self.color_map[label] = PLOT_COLORS[self._next_color_idx % len(PLOT_COLORS)]
+                self._next_color_idx += 1
         col = self.color_map[label]
 
         # Compute X vector
@@ -369,7 +409,7 @@ class UniversalPlotterWindow(QMainWindow):
         curve = self.plot_widget.plot(
             x_vec,
             y_data,
-            pen=pg.mkPen(color=col, width=2.0),
+            pen=pg.mkPen(color=col, width=2.0, cosmetic=True),
             name=label
         )
         self.active_curves[label] = curve
@@ -402,6 +442,153 @@ class UniversalPlotterWindow(QMainWindow):
         self.curve_data.clear()
 
     # ---------------------------------------------------------
+    # Programmatic Marker Plotting
+    # ---------------------------------------------------------
+    def plot_marker_coordinates(
+        self,
+        marker_name: str,
+        components: Tuple[str, ...] = ("X", "Y", "Z"),
+        clear_others: bool = True
+    ):
+        """
+        Immediately plot the requested coordinates (default X, Y, Z) for the given marker.
+        Expands the marker node in the tree, checks the corresponding component items,
+        and auto-ranges the plot view.
+        """
+        if not self.trial or marker_name not in self.trial.markers:
+            return
+
+        if clear_others:
+            self.clear_all_curves()
+
+        if self.search_box.text():
+            self.search_box.clear()
+
+        # Find the marker item in the tree
+        markers_root = None
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if "Markers" in item.text(0):
+                markers_root = item
+                break
+
+        target_m_item = None
+        if markers_root:
+            markers_root.setExpanded(True)
+            for i in range(markers_root.childCount()):
+                c = markers_root.child(i)
+                if c.text(0) == marker_name:
+                    target_m_item = c
+                    break
+
+        if target_m_item:
+            target_m_item.setExpanded(True)
+            self.tree.scrollToItem(target_m_item)
+            for j in range(target_m_item.childCount()):
+                sub_item = target_m_item.child(j)
+                role_data = sub_item.data(0, Qt.UserRole)
+                if role_data and role_data[0] == "marker":
+                    comp_name = role_data[3]
+                    if comp_name in components:
+                        lbl = sub_item.text(0)
+                        sub_item.setCheckState(0, Qt.Checked)
+                        if lbl not in self.active_curves:
+                            self._add_signal(lbl, role_data)
+        else:
+            # Direct addition fallback if tree not yet populated
+            for comp_name, comp_idx in [("X", 0), ("Y", 1), ("Z", 2)]:
+                if comp_name in components:
+                    lbl = f"{marker_name} ({comp_name})"
+                    if lbl not in self.active_curves:
+                        self._add_signal(lbl, ("marker", marker_name, comp_idx, comp_name))
+
+        self.auto_range()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def plot_markers_coordinates(
+        self,
+        marker_names: List[str],
+        components: Tuple[str, ...] = ("X", "Y", "Z"),
+        clear_others: bool = True
+    ):
+        """Immediately plot coordinates for multiple selected markers."""
+        if not self.trial or not marker_names:
+            return
+
+        if clear_others:
+            self.clear_all_curves()
+
+        for name in marker_names:
+            if name in self.trial.markers:
+                self.plot_marker_coordinates(name, components=components, clear_others=False)
+
+        self.auto_range()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def plot_distance(
+        self,
+        m1: str,
+        m2: str,
+        dist_data: Optional[np.ndarray] = None,
+        clear_others: bool = True
+    ):
+        """Immediately plot the Euclidean distance trajectory between two markers."""
+        if not self.trial or m1 not in self.trial.markers or m2 not in self.trial.markers:
+            return
+
+        if clear_others:
+            self.clear_all_curves()
+
+        if dist_data is None:
+            from gui.marker_tools_dialog import compute_distance_trajectory
+            dist_data = compute_distance_trajectory(self.trial.markers[m1], self.trial.markers[m2])
+
+        label = f"Distance: {m1} ↔ {m2} (mm)"
+
+        # Check if Measurements category exists in tree
+        meas_root = None
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            if "Measurements" in it.text(0):
+                meas_root = it
+                break
+
+        if not meas_root:
+            meas_root = QTreeWidgetItem(["Measurements (Distances)"])
+            meas_root.setForeground(0, QColor("#E040FB"))
+            self.tree.addTopLevelItem(meas_root)
+
+        meas_root.setExpanded(True)
+
+        target_item = None
+        for i in range(meas_root.childCount()):
+            c = meas_root.child(i)
+            if c.text(0) == label:
+                target_item = c
+                break
+
+        if not target_item:
+            target_item = QTreeWidgetItem([label])
+            target_item.setFlags(target_item.flags() | Qt.ItemIsUserCheckable)
+            target_item.setData(0, Qt.UserRole, ("distance", m1, m2, dist_data))
+            meas_root.addChild(target_item)
+        else:
+            target_item.setData(0, Qt.UserRole, ("distance", m1, m2, dist_data))
+
+        target_item.setCheckState(0, Qt.Checked)
+        if label not in self.active_curves:
+            self._add_signal(label, ("distance", m1, m2, dist_data))
+
+        self.auto_range()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    # ---------------------------------------------------------
     # X-Axis Mode (Time vs Frame)
     # ---------------------------------------------------------
     def _compute_x_vec(self, n_points: int, rate: float, subsamples: int) -> np.ndarray:
@@ -431,8 +618,105 @@ class UniversalPlotterWindow(QMainWindow):
                 x = self._compute_x_vec(len(y), info["rate"], info["subsamples"])
                 curve.setData(x, y)
 
+        # Synchronize ROI region bounds for new axis mode
+        if self.roi_region is not None and self.trim_range is not None and self.trial:
+            start_f, end_f = self.trim_range
+            rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+            self.roi_region.blockSignals(True)
+            if self.x_axis_mode == "frame":
+                self.roi_region.setRegion([float(start_f), float(end_f)])
+            else:
+                self.roi_region.setRegion([start_f / rate, end_f / rate])
+            self.roi_region.blockSignals(False)
+
         self.update_frame(self.current_frame)
         self.auto_range()
+
+    def set_trim_range(self, start_frame: int, end_frame: int):
+        """Update ROI Region of Interest on UniversalPlotterWindow."""
+        if not self.trial:
+            return
+        n = self.trial.point_frame_count
+        start_f = max(0, min(n - 1, start_frame))
+        end_f = max(start_f, min(n - 1, end_frame))
+        self.trim_range = (start_f, end_f)
+
+        rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+        is_trimmed = (start_f > 0 or end_f < n - 1)
+
+        if self.x_axis_mode == "frame":
+            reg_start = float(start_f)
+            reg_end = float(end_f)
+        else:
+            reg_start = start_f / rate
+            reg_end = end_f / rate
+
+        if self.roi_region is None:
+            self.roi_region = pg.LinearRegionItem(
+                values=[reg_start, reg_end],
+                orientation=pg.LinearRegionItem.Vertical,
+                brush=pg.mkBrush(0, 173, 181, 28),
+                pen=pg.mkPen(color="#00ADB5", width=1.5, style=Qt.DashLine),
+                hoverPen=pg.mkPen(color="#00E5FF", width=2.0, style=Qt.SolidLine),
+                movable=True
+            )
+            self.roi_region.setZValue(-10)
+            self.roi_region.sigRegionChanged.connect(self._on_roi_region_dragged)
+            self.plot_widget.addItem(self.roi_region)
+        else:
+            self.roi_region.blockSignals(True)
+            self.roi_region.setRegion([reg_start, reg_end])
+            self.roi_region.blockSignals(False)
+
+        self.roi_region.setVisible(is_trimmed)
+        if hasattr(self, 'lbl_roi_status'):
+            if is_trimmed:
+                t_s = start_f / rate
+                t_e = end_f / rate
+                self.lbl_roi_status.setText(f"ROI: F{start_f}–{end_f} ({t_s:.2f}s–{t_e:.2f}s)")
+                self.lbl_roi_status.setStyleSheet(
+                    "background: #142838; border: 1px solid #00ADB5; border-radius: 10px; "
+                    "padding: 3px 8px; color: #00E5FF; font-size: 11px; font-weight: 600;"
+                )
+            else:
+                self.lbl_roi_status.setText("ROI: Full Trial")
+                self.lbl_roi_status.setStyleSheet(
+                    "background: #1E2433; border: 1px solid #333F54; border-radius: 10px; "
+                    "padding: 3px 8px; color: #94A3B8; font-size: 11px;"
+                )
+
+    def _on_roi_region_dragged(self):
+        if not self.roi_region or not self.trial:
+            return
+        bounds = self.roi_region.getRegion()
+        rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+        if self.x_axis_mode == "frame":
+            start_f = int(round(bounds[0]))
+            end_f = int(round(bounds[1]))
+        else:
+            start_f = int(round(bounds[0] * rate))
+            end_f = int(round(bounds[1] * rate))
+
+        n = self.trial.point_frame_count
+        start_f = max(0, min(n - 1, start_f))
+        end_f = max(start_f, min(n - 1, end_f))
+        self.trim_range = (start_f, end_f)
+        self.trimRangeChanged.emit(start_f, end_f)
+
+    def fit_roi(self):
+        """Fit horizontal zoom strictly to trimmed ROI range."""
+        if not self.trial or not self.trim_range:
+            return
+        start_f, end_f = self.trim_range
+        rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+        if self.x_axis_mode == "frame":
+            x_min = float(start_f)
+            x_max = float(end_f)
+        else:
+            x_min = start_f / rate
+            x_max = end_f / rate
+        span = max(0.01, x_max - x_min)
+        self.plot_widget.setXRange(x_min - span * 0.04, x_max + span * 0.04, padding=0.0)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -487,7 +771,34 @@ class UniversalPlotterWindow(QMainWindow):
 
     def auto_range(self):
         """Fit plot to curves."""
-        self.plot_widget.autoRange()
+        if not self.active_curves or not self.curve_data:
+            self.plot_widget.autoRange()
+            return
+
+        all_x_min, all_x_max = float("inf"), float("-inf")
+        all_y_min, all_y_max = float("inf"), float("-inf")
+
+        for label in self.active_curves.keys():
+            info = self.curve_data.get(label)
+            if info:
+                y = info["y"]
+                valid = y[~np.isnan(y)]
+                if len(valid) > 0:
+                    all_y_min = min(all_y_min, float(np.min(valid)))
+                    all_y_max = max(all_y_max, float(np.max(valid)))
+                n_pts = len(y)
+                if n_pts > 0:
+                    x = self._compute_x_vec(n_pts, info["rate"], info["subsamples"])
+                    all_x_min = min(all_x_min, float(x[0]))
+                    all_x_max = max(all_x_max, float(x[-1]))
+
+        if all_x_min < all_x_max and all_y_min < all_y_max:
+            self.plot_widget.getPlotItem().setXRange(all_x_min, all_x_max, padding=0.03)
+            y_span = all_y_max - all_y_min
+            pad_y = max(1.0, y_span * 0.08)
+            self.plot_widget.getPlotItem().setYRange(all_y_min - pad_y, all_y_max + pad_y, padding=0.0)
+        else:
+            self.plot_widget.autoRange()
 
     def _toggle_downsampling(self, enabled: bool):
         self.set_downsampling(enabled)

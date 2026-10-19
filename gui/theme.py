@@ -23,9 +23,13 @@ def build_theme_qss(
     selection_text: str,
     scrollbar_bg: str,
     scrollbar_handle: str,
-    dock_title_bg: str
+    dock_title_bg: str,
+    alternate_bg: str = ""
 ) -> str:
     """Generate a comprehensive, consistent Qt stylesheet for the entire workstation."""
+    if not alternate_bg:
+        alternate_bg = card_bg
+
     return f"""
 /* Base Application Styling */
 QMainWindow, QDialog, QWidget {{
@@ -196,17 +200,37 @@ QTabBar::tab:hover:!selected {{
 /* Tree and Table Views */
 QTreeView, QTableView, QTableWidget, QListWidget {{
     background-color: {table_bg};
+    alternate-background-color: {alternate_bg};
     color: {text};
     border: 1px solid {border};
     border-radius: 4px;
     selection-background-color: {selection_bg};
     selection-color: {selection_text};
     gridline-color: {table_grid};
+    outline: none;
+}}
+QTreeView::item, QTableView::item, QTableWidget::item, QListWidget::item {{
+    background-color: {table_bg};
+    color: {text};
+    padding: 3px 6px;
+}}
+QTreeView::item:alternate, QTableView::item:alternate, QTableWidget::item:alternate, QListWidget::item:alternate {{
+    background-color: {alternate_bg};
+    color: {text};
+}}
+QTreeView::item:selected, QTableView::item:selected, QTableWidget::item:selected, QListWidget::item:selected,
+QTreeView::item:selected:active, QTableView::item:selected:active, QTableWidget::item:selected:active, QListWidget::item:selected:active,
+QTreeView::item:selected:!active, QTableView::item:selected:!active, QTableWidget::item:selected:!active, QListWidget::item:selected:!active {{
+    background-color: {selection_bg};
+    color: {selection_text};
+}}
+QTreeView::item:hover:!selected, QTableView::item:hover:!selected, QTableWidget::item:hover:!selected, QListWidget::item:hover:!selected {{
+    background-color: {card_bg};
 }}
 QHeaderView::section {{
     background-color: {header_bg};
     color: {text};
-    padding: 5px;
+    padding: 6px;
     border: 1px solid {border};
     font-weight: 600;
 }}
@@ -385,7 +409,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             selection_text="#FFFFFF",
             scrollbar_bg="#14161F",
             scrollbar_handle="#32384D",
-            dock_title_bg="#1A1D27"
+            dock_title_bg="#1A1D27",
+            alternate_bg="#1E2231"
         )
     },
     "Clinical Light (Clean Medical White)": {
@@ -416,7 +441,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             selection_text="#FFFFFF",
             scrollbar_bg="#F3F4F6",
             scrollbar_handle="#CBD5E1",
-            dock_title_bg="#E5E7EB"
+            dock_title_bg="#E5E7EB",
+            alternate_bg="#F8FAFC"
         )
     },
     "Nordic Midnight (Arctic Deep Blue)": {
@@ -447,7 +473,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             selection_text="#ECEFF4",
             scrollbar_bg="#1A1D24",
             scrollbar_handle="#3B4252",
-            dock_title_bg="#21252E"
+            dock_title_bg="#21252E",
+            alternate_bg="#282D38"
         )
     },
     "Graphite Slate (Monochrome Titanium)": {
@@ -478,7 +505,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             selection_text="#FFFFFF",
             scrollbar_bg="#141516",
             scrollbar_handle="#3A3B3C",
-            dock_title_bg="#202122"
+            dock_title_bg="#202122",
+            alternate_bg="#26282B"
         )
     },
     "Cyber Amber (Navy & Gold)": {
@@ -509,9 +537,11 @@ THEMES: Dict[str, Dict[str, Any]] = {
             selection_text="#0A1118",
             scrollbar_bg="#070C12",
             scrollbar_handle="#1E2E40",
-            dock_title_bg="#0D151F"
+            dock_title_bg="#0D151F",
+            alternate_bg="#131C28"
         )
     }
+
 }
 
 DEFAULT_THEME_NAME = "Biomech Dark (Obsidian & Cyan)"
@@ -526,3 +556,31 @@ def get_theme_names() -> List[str]:
 def get_theme(name: str) -> Dict[str, Any]:
     """Retrieve theme dictionary by name, falling back to default."""
     return THEMES.get(name, THEMES[DEFAULT_THEME_NAME])
+
+
+def create_theme_palette(theme_dict: Dict[str, Any]):
+    """Create a matching QPalette so native widgets and item delegates have proper dark/light colors."""
+    from PySide6.QtGui import QPalette, QColor
+    pal = QPalette()
+    is_dark = theme_dict.get("is_dark", True)
+
+    bg_col = QColor("#16181F" if is_dark else "#F3F4F6")
+    text_col = QColor("#ECEFF4" if is_dark else "#1F2937")
+    panel_col = QColor("#1C1F2B" if is_dark else "#FFFFFF")
+    accent_col = QColor(theme_dict.get("accent", "#00ADB5" if is_dark else "#0284C7"))
+    table_col = QColor("#181A24" if is_dark else "#FFFFFF")
+    alt_col = QColor("#1E2231" if is_dark else "#F8FAFC")
+    sel_text_col = QColor("#FFFFFF")
+
+    pal.setColor(QPalette.Window, bg_col)
+    pal.setColor(QPalette.WindowText, text_col)
+    pal.setColor(QPalette.Base, table_col)
+    pal.setColor(QPalette.AlternateBase, alt_col)
+    pal.setColor(QPalette.ToolTipBase, panel_col)
+    pal.setColor(QPalette.ToolTipText, text_col)
+    pal.setColor(QPalette.Text, text_col)
+    pal.setColor(QPalette.Button, panel_col)
+    pal.setColor(QPalette.ButtonText, text_col)
+    pal.setColor(QPalette.Highlight, accent_col)
+    pal.setColor(QPalette.HighlightedText, sel_text_col)
+    return pal

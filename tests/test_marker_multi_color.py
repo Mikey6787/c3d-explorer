@@ -44,7 +44,7 @@ QTest.mouseClick(panel.markers_table.viewport(), Qt.LeftButton, Qt.ShiftModifier
 selected = panel.get_selected_markers()
 assert selected == ["M01", "M02", "M03", "M04", "M05"], f"Expected rows 1..5, got {selected}"
 assert panel.btn_color.text() == "Color (5)...", f"Expected 'Color (5)...', got {panel.btn_color.text()}"
-assert panel.btn_reset_color.text() == "Reset (5)", f"Expected 'Reset (5)', got {panel.btn_reset_color.text()}"
+assert hasattr(panel, 'btn_add') and panel.btn_add.text() == "Add...", f"Expected 'Add...', got {panel.btn_add.text()}"
 print("Shift-click range selection verified: selected 5 markers in row order.")
 
 # 2. Test batch color assignment

@@ -54,6 +54,21 @@ class TimelineWidget(QWidget):
         self.handle_width = 12
         self.handle_height = 24
 
+        # Theme colors (adaptive to light/dark themes)
+        self.is_dark: bool = True
+        self.bg_color: QColor = QColor("#161822")
+        self.border_color: QColor = QColor("transparent")
+        self.tick_color: QColor = QColor("#6A738A")
+        self.track_border_color: QColor = QColor("#252A3D")
+        self.track_bg_color: QColor = QColor("#151824")
+        self.track_active_color: QColor = QColor("#1C2030")
+        self.track_trimmed_color: QColor = QColor("#1E273C")
+        self.accent_color: QColor = QColor("#00ADB5")
+        self.accent_hover_color: QColor = QColor("#00E5FF")
+        self.text_muted_color: QColor = QColor("#A3ADC2")
+        self.dim_color: QColor = QColor(10, 12, 18, 180)
+        self.handle_bg_color: QColor = QColor("#F0F4F8")
+
     @property
     def _is_dragging(self) -> bool:
         return self._drag_mode is not None
@@ -104,6 +119,40 @@ class TimelineWidget(QWidget):
     def reset_trim_range(self):
         """Reset the cut/trim range to the entire trial."""
         self.set_trim_range(0, self.total_frames - 1)
+
+    def apply_theme(self, theme_dict: dict):
+        """Update timeline styling according to the active application theme."""
+        self.is_dark = theme_dict.get("is_dark", True)
+        accent_hex = theme_dict.get("accent", "#00ADB5" if self.is_dark else "#0284C7")
+        accent_hover_hex = theme_dict.get("accent_hover", "#00E5FF" if self.is_dark else "#0369A1")
+
+        self.accent_color = QColor(accent_hex)
+        self.accent_hover_color = QColor(accent_hover_hex)
+
+        if self.is_dark:
+            self.bg_color = QColor("#161822")
+            self.border_color = QColor("transparent")
+            self.tick_color = QColor("#6A738A")
+            self.track_border_color = QColor("#252A3D")
+            self.track_bg_color = QColor("#151824")
+            self.track_active_color = QColor("#1C2030")
+            self.track_trimmed_color = QColor("#1E273C")
+            self.text_muted_color = QColor("#A3ADC2")
+            self.dim_color = QColor(10, 12, 18, 180)
+            self.handle_bg_color = QColor("#F0F4F8")
+        else:
+            self.bg_color = QColor("#FFFFFF")
+            self.border_color = QColor(theme_dict.get("border", "#D1D5DB"))
+            self.tick_color = QColor(theme_dict.get("text_muted", "#6B7280"))
+            self.track_border_color = QColor(theme_dict.get("border", "#D1D5DB"))
+            self.track_bg_color = QColor("#E5E7EB")
+            self.track_active_color = QColor("#F3F4F6")
+            self.track_trimmed_color = QColor("#E0F2FE")
+            self.text_muted_color = QColor(theme_dict.get("text_muted", "#4B5563"))
+            self.dim_color = QColor(220, 225, 235, 170)
+            self.handle_bg_color = QColor("#FFFFFF")
+
+        self.update()
 
     def _track_rect(self) -> QRectF:
         w = max(10, self.width() - 2 * self.track_margin_x)
@@ -180,15 +229,20 @@ class TimelineWidget(QWidget):
         width = self.width()
 
         # 1. Background ruler / tick area
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#161822"))
-        painter.drawRoundedRect(self.rect(), 4, 4)
+        if not self.is_dark and self.border_color != Qt.transparent:
+            painter.setPen(QPen(self.border_color, 1))
+            bg_rect = self.rect().adjusted(0, 0, -1, -1)
+        else:
+            painter.setPen(Qt.NoPen)
+            bg_rect = self.rect()
+        painter.setBrush(self.bg_color)
+        painter.drawRoundedRect(bg_rect, 4, 4)
 
         # 2. Time & Frame graduation marks
         font = QFont(self.font())
         font.setPointSize(9)
         painter.setFont(font)
-        painter.setPen(QColor("#6A738A"))
+        painter.setPen(self.tick_color)
 
         # Determine tick intervals based on total frames
         total_seconds = self.total_frames / self.point_rate
@@ -220,28 +274,28 @@ class TimelineWidget(QWidget):
         is_trimmed = (self.trim_start_frame > 0 or self.trim_end_frame < self.total_frames - 1)
 
         # Base Track Groove
-        groove_pen = QPen(QColor("#252A3D"), 1)
+        groove_pen = QPen(self.track_border_color, 1)
         painter.setPen(groove_pen)
-        painter.setBrush(QColor("#151824"))
+        painter.setBrush(self.track_bg_color)
         painter.drawRoundedRect(track, 5, 5)
 
         # Active Trimmed Region on Track
         active_rect = QRectF(x_start, track.top(), max(0.0, x_end - x_start), track.height())
-        painter.setPen(QPen(QColor("#00ADB5"), 1) if is_trimmed else Qt.NoPen)
-        painter.setBrush(QColor("#1E273C") if is_trimmed else QColor("#1C2030"))
+        painter.setPen(QPen(self.accent_color, 1) if is_trimmed else Qt.NoPen)
+        painter.setBrush(self.track_trimmed_color if is_trimmed else self.track_active_color)
         painter.drawRect(active_rect)
 
         # Dim excluded regions outside the cut range
         if self.trim_start_frame > 0:
             dim_left = QRectF(track.left(), track.top(), max(0.0, x_start - track.left()), track.height())
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(10, 12, 18, 180))
+            painter.setBrush(self.dim_color)
             painter.drawRect(dim_left)
 
         if self.trim_end_frame < self.total_frames - 1:
             dim_right = QRectF(x_end, track.top(), max(0.0, track.right() - x_end), track.height())
             painter.setPen(Qt.NoPen)
-            painter.setBrush(QColor(10, 12, 18, 180))
+            painter.setBrush(self.dim_color)
             painter.drawRect(dim_right)
 
         # 4. Event Markers
@@ -266,7 +320,7 @@ class TimelineWidget(QWidget):
 
             # Highlight if hovered
             if self._hovered_event == ev:
-                painter.setPen(QPen(QColor("#FFFFFF"), 1))
+                painter.setPen(QPen(QColor("#FFFFFF") if self.is_dark else QColor("#1F2937"), 1))
                 painter.setBrush(Qt.NoBrush)
                 painter.drawEllipse(QPointF(ev_x, 24), 6, 6)
 
@@ -304,27 +358,24 @@ class TimelineWidget(QWidget):
         is_active = (self._drag_mode == 'playhead' or self._handle_hovered)
 
         # Scrubber vertical playhead line through the track
-        painter.setPen(QPen(QColor("#00E5FF" if is_active else "#00ADB5"), 2))
+        playhead_col = self.accent_hover_color if is_active else self.accent_color
+        painter.setPen(QPen(playhead_col, 2))
         painter.drawLine(QPointF(handle_x, track.top() - 2), QPointF(handle_x, track.bottom() + 2))
 
         # Scrubber handle thumb
-        if is_active:
-            painter.setPen(QPen(QColor("#00E5FF"), 2))
-            painter.setBrush(QColor("#FFFFFF"))
-        else:
-            painter.setPen(QPen(QColor("#00ADB5"), 2))
-            painter.setBrush(QColor("#F0F4F8"))
+        painter.setPen(QPen(playhead_col, 2))
+        painter.setBrush(self.handle_bg_color)
         painter.drawRoundedRect(handle_rect, 4, 4)
 
         # Scrubber inner detail line
-        painter.setPen(QPen(QColor("#00ADB5"), 2))
+        painter.setPen(QPen(playhead_col, 2))
         painter.drawLine(
             QPointF(handle_x, handle_rect.top() + 4),
             QPointF(handle_x, handle_rect.bottom() - 4)
         )
 
         # 9. Bottom frame / time readout with Cut/Trim info
-        painter.setPen(QColor("#A3ADC2"))
+        painter.setPen(self.text_muted_color)
         cur_t = self.current_frame / self.point_rate
         trim_len = self.trim_end_frame - self.trim_start_frame + 1
         trim_sec = trim_len / self.point_rate

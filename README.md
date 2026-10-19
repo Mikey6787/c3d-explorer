@@ -86,8 +86,8 @@ Under **`Tools -> Events`** (or timeline right-click):
 - **Bi-Directional Synchronization**: Selecting markers in the 3D viewport immediately highlights them in the Markers panel table, and selecting markers in the table immediately highlights them in the 3D viewport.
 - **Tools with Auto-Populated Preselection**:
   - **Create Average Marker (`Tools -> Marker -> Create Average Marker...`)**: Automatically pre-populates Marker 1 and Marker 2 with the selected markers and suggests a default name `Avg_M1_M2`. Computes midpoint trajectory across all frames.
-  - **Measure Distance between 2 Markers**: Automatically pre-populates Marker 1 and Marker 2 with selected markers, calculates Euclidean distance in real-time, displays live distance and statistics (mean, min, max, std), interactive 3D line overlay, and 2D trajectory plotting.
-  - **Measure Angle between 3 Markers**: Pre-populates selected markers as A, B, and C, calculates 3D segment angle $\angle ABC$, with live angles, trial statistics, 3D angle ray overlays, and time-series plotting.
+  - **Measure Distance between 2 Markers**: Automatically pre-populates Marker 1 and Marker 2 with selected markers, calculates Euclidean distance in real-time, displays live distance and statistics (Mean, SD, Min, Max) calculated strictly within the trimmed Region of Interest (ROI), interactive 3D line overlay, and 2D trajectory plotting with ROI curve highlighting, interactive ROI drag handles, and one-click "Fit ROI" / "Crop to ROI" options.
+  - **Measure Angle between 3 Markers**: Pre-populates selected markers as A, B, and C, calculates 3D segment angle $\angle ABC$, with live angles, trial ROI statistics (Mean, SD, Min, Max computed between the trimmed positions), 3D angle ray overlays, and time-series plotting with ROI section highlighting.
 - **Rename & Custom Colors**:
   - **Double-Click**: Instant in-place inline rename in the Markers panel table.
   - **Dialog / Menu**: Right-click any marker or use `Tools -> Marker -> Rename...` / side panel `Rename...` button.
@@ -117,10 +117,10 @@ Under **`Settings -> Visual Configurations...`**:
 
 ### 10. Menus & File I/O
 - **File**: Open C3D (`Ctrl+O` / `Cmd+O`), Open Recent files list, Open File Location (Finder/Explorer), Save (`Ctrl+S`), Save As, Export C3D, Export as STL, Export CSV (Markers / Analogs), Exit.
-- **Edit**: Undo, Redo, Cut, Copy, Paste, Select All, Options/Settings.
+- **Edit**: Undo (`Ctrl+Z`), Redo (`Ctrl+Y` / `Cmd+Shift+Z`), Export Summary Report.
 - **View**: Reset View, Top, Front, Side, Iso views, Theme selection (`View -> Theme`), show/hide markers, plates, axes, grid, GRF vectors, and Panels submenu (`Markers`, `Analog`).
-- **Settings**: Visual configurations (Display, Coordinate System, 3D Visuals, Playback).
-- **Tools**: Plotter (`Ctrl+P`), Events (`Ctrl+E`), Marker submenu (Average, Distance, Angle, Rename, Color), Export summary report.
+- **Settings**: Direct dialog for visual configurations (Display, Coordinate System, 3D Visuals, Playback).
+- **Tools**: Plotter (`Ctrl+P`), Events (`Ctrl+E`), Marker submenu (Average, Distance, Angle, Rename, Color).
 - **Drag & Drop**: Drag any `.c3d` file directly into the window.
 
 ---

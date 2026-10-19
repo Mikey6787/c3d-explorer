@@ -35,7 +35,7 @@ class EventEditDialog(QDialog):
 
         is_edit = event_to_edit is not None
         self.setWindowTitle("Edit C3D Event" if is_edit else "Add C3D Event")
-        self.resize(440, 360)
+        self.resize(480, 370)
 
         # Active color
         if is_edit and event_to_edit.icon_color:
@@ -58,6 +58,7 @@ class EventEditDialog(QDialog):
         # 1. Event Name / Label
         self.combo_name = QComboBox()
         self.combo_name.setEditable(True)
+        self.combo_name.setMinimumWidth(260)
         self.combo_name.addItems([
             "Foot Strike",
             "Foot Off",
@@ -74,6 +75,7 @@ class EventEditDialog(QDialog):
         # 2. Context / Leg
         self.combo_context = QComboBox()
         self.combo_context.setEditable(True)
+        self.combo_context.setMinimumWidth(260)
         self.combo_context.addItems(["Right", "Left", "General"])
         self.combo_context.currentTextChanged.connect(self._on_context_changed)
         form.addRow("<b>Context / Leg:</b>", self.combo_context)
@@ -147,7 +149,11 @@ class EventEditDialog(QDialog):
         if self.event_to_edit:
             ev = self.event_to_edit
             self.combo_name.setCurrentText(ev.name)
+            if self.combo_name.lineEdit():
+                self.combo_name.lineEdit().setCursorPosition(0)
             self.combo_context.setCurrentText(ev.context if ev.context else "General")
+            if self.combo_context.lineEdit():
+                self.combo_context.lineEdit().setCursorPosition(0)
             self.spin_frame.setValue(ev.frame)
             self.spin_time.setValue(ev.time)
             self.txt_subject.setText(getattr(ev, "subject", "") or "")
@@ -266,18 +272,31 @@ class EventManagerDialog(QDialog):
 
         # Events Table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels([
-            "Event", "Context / Leg", "Time (s)", "Frame", "Subject", "Description"
+            "Event", "Time (s)", "Frame", "Subject", "Description"
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.itemDoubleClicked.connect(self._on_edit_selected)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
+
+        # Allow pressing Delete / Backspace key to delete selected events
+        old_mgr_key = self.table.keyPressEvent
+        def _on_mgr_key_press(event):
+            if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
+                self._on_delete_selected()
+            else:
+                old_mgr_key(event)
+        self.table.keyPressEvent = _on_mgr_key_press
+
         layout.addWidget(self.table)
 
         # Action Buttons
@@ -331,27 +350,23 @@ class EventManagerDialog(QDialog):
             name_item.setData(Qt.UserRole, ev)
             self.table.setItem(row, 0, name_item)
 
-            # Context
-            ctx_item = QTableWidgetItem(ev.context or "")
-            self.table.setItem(row, 1, ctx_item)
-
             # Time
             t_item = QTableWidgetItem(f"{ev.time:.4f}")
             t_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(row, 2, t_item)
+            self.table.setItem(row, 1, t_item)
 
             # Frame
             f_item = QTableWidgetItem(str(ev.frame))
             f_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            self.table.setItem(row, 3, f_item)
+            self.table.setItem(row, 2, f_item)
 
             # Subject
             subj_item = QTableWidgetItem(getattr(ev, "subject", "") or "")
-            self.table.setItem(row, 4, subj_item)
+            self.table.setItem(row, 3, subj_item)
 
             # Description
             desc_item = QTableWidgetItem(getattr(ev, "description", "") or "")
-            self.table.setItem(row, 5, desc_item)
+            self.table.setItem(row, 4, desc_item)
 
     def _get_selected_event(self) -> Optional[C3DEvent]:
         sel = self.table.currentRow()
@@ -383,20 +398,44 @@ class EventManagerDialog(QDialog):
             self._refresh_table()
             self.eventListChanged.emit()
 
+    def _get_selected_events(self) -> List[C3DEvent]:
+        """Return list of all currently selected events from table rows."""
+        rows = sorted(set(idx.row() for idx in self.table.selectedIndexes()))
+        events: List[C3DEvent] = []
+        for r in rows:
+            item = self.table.item(r, 0)
+            if item:
+                ev = item.data(Qt.UserRole)
+                if ev and ev not in events:
+                    events.append(ev)
+        return events
+
     def _on_delete_selected(self):
-        ev = self._get_selected_event()
-        if not ev:
-            QMessageBox.information(self, "Delete Event", "Please select an event to delete.")
+        evs = self._get_selected_events()
+        if not evs:
+            single = self._get_selected_event()
+            if single:
+                evs = [single]
+
+        if not evs:
+            QMessageBox.information(self, "Delete Event", "Please select one or more events to delete.")
             return
+
+        if len(evs) == 1:
+            msg = f"Are you sure you want to delete event '{evs[0].display_name}' at frame {evs[0].frame}?"
+        else:
+            msg = f"Are you sure you want to delete all {len(evs)} selected events?"
 
         confirm = QMessageBox.question(
             self,
             "Confirm Deletion",
-            f"Are you sure you want to delete event '{ev.display_name}' at frame {ev.frame}?",
+            msg,
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
-            self.trial.events.remove(ev)
+            for ev in evs:
+                if ev in self.trial.events:
+                    self.trial.events.remove(ev)
             self._refresh_table()
             self.eventListChanged.emit()
 
@@ -423,15 +462,26 @@ class EventManagerDialog(QDialog):
     def _on_context_menu(self, pos):
         item = self.table.itemAt(pos)
         menu = QMenu(self)
-        if item:
-            ev = self._get_selected_event()
-            act_edit = menu.addAction(f"Edit '{ev.display_name}'...")
-            act_edit.triggered.connect(self._on_edit_selected)
-            act_del = menu.addAction(f"Delete '{ev.display_name}'")
-            act_del.triggered.connect(self._on_delete_selected)
-            act_jump = menu.addAction(f"Jump to Frame {ev.frame}")
-            act_jump.triggered.connect(self._on_jump_to_event)
-            menu.addSeparator()
+        sel_evs = self._get_selected_events()
+        if not sel_evs and item:
+            single = self._get_selected_event()
+            if single:
+                sel_evs = [single]
+
+        if sel_evs:
+            if len(sel_evs) == 1:
+                ev = sel_evs[0]
+                act_edit = menu.addAction(f"Edit '{ev.display_name}'...")
+                act_edit.triggered.connect(self._on_edit_selected)
+                act_del = menu.addAction(f"Delete '{ev.display_name}'")
+                act_del.triggered.connect(self._on_delete_selected)
+                act_jump = menu.addAction(f"Jump to Frame {ev.frame}")
+                act_jump.triggered.connect(self._on_jump_to_event)
+                menu.addSeparator()
+            else:
+                act_del = menu.addAction(f"Delete {len(sel_evs)} Selected Events")
+                act_del.triggered.connect(self._on_delete_selected)
+                menu.addSeparator()
 
         act_add = menu.addAction("Add New Event...")
         act_add.triggered.connect(self._on_add_event)

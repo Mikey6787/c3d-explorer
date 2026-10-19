@@ -4,11 +4,11 @@ import os
 import subprocess
 import sys
 import numpy as np
-from typing import Optional, List
-from PySide6.QtCore import Qt, QSettings, QFileInfo, QUrl
+from typing import Optional, List, Tuple
+from PySide6.QtCore import Qt, QSettings, QFileInfo, QUrl, QPoint, QSize
 from PySide6.QtGui import (
     QAction, QActionGroup, QKeySequence, QIcon, QDesktopServices,
-    QDragEnterEvent, QDropEvent
+    QDragEnterEvent, QDropEvent, QColor, QUndoStack, QImage, QPixmap, QPainter
 )
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QSplitter,
@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QStatusBar, QMenu
 )
 
-from gui.theme import THEMES, get_theme, get_theme_names, DEFAULT_THEME_NAME
+from gui.theme import THEMES, get_theme, get_theme_names, DEFAULT_THEME_NAME, create_theme_palette
 
 from core.data_models import C3DTrial, C3DEvent
 from core.c3d_reader import C3DReader
@@ -28,10 +28,18 @@ from gui.playback_controller import PlaybackController
 from gui.plot_panel import PlotPanel
 from gui.side_panel import SidePanel
 from gui.settings_dialog import SettingsDialog
-from gui.marker_tools_dialog import CreateAverageMarkerDialog, MeasureDistanceDialog, MeasureAngleDialog
+from gui.marker_tools_dialog import (
+    CreateAverageMarkerDialog, MeasureDistanceDialog, MeasureAngleDialog, AddMarkerDialog
+)
 from gui.plotter_window import UniversalPlotterWindow
+from gui.measurement_plot_window import MeasurementPlotWindow
 from gui.event_dialog import EventEditDialog, EventManagerDialog
 from gui.about_dialog import AboutDialog
+from gui.undo_commands import (
+    AddEventCommand, DeleteEventCommand, DeleteEventsCommand, EditEventCommand,
+    ClearEventsCommand, EventsBatchCommand, RenameMarkerCommand,
+    AddMarkerCommand, DeleteMarkerCommand, DeleteMarkersCommand, ChangeMarkerColorCommand
+)
 
 
 class MainWindow(QMainWindow):
@@ -52,10 +60,13 @@ class MainWindow(QMainWindow):
         self.trial: Optional[C3DTrial] = None
         self.current_file_path: Optional[str] = None
         self.settings = QSettings("Biomech", "C3D explorer")
+        self.undo_stack = QUndoStack(self)
+        self._is_undo_redo_running: bool = False
 
         self.dist_dialog: Optional[MeasureDistanceDialog] = None
         self.angle_dialog: Optional[MeasureAngleDialog] = None
         self.plotter_window: Optional[UniversalPlotterWindow] = None
+        self.measurement_plot_windows: List[MeasurementPlotWindow] = []
         self.current_theme_name: str = DEFAULT_THEME_NAME
 
         # Playback Controller
@@ -75,6 +86,8 @@ class MainWindow(QMainWindow):
         self._setup_status_bar()
         self._connect_signals()
         self._update_recent_files_menu()
+        self._load_saved_settings()
+        self.apply_theme(self.current_theme_name)
 
     def _setup_layout(self):
         """Construct dockable, responsive workstation layout."""
@@ -121,48 +134,35 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 4, 12, 4)
         layout.setSpacing(8)
 
-        # Jump to start
-        self.btn_jump_start = QPushButton("|<")
-        self.btn_jump_start.setToolTip("Jump to Start (Home)")
-        self.btn_jump_start.setFixedWidth(36)
-        self.btn_jump_start.clicked.connect(self.playback.jump_to_start)
-        layout.addWidget(self.btn_jump_start)
-
         # Step backward 1 frame
-        self.btn_step_back = QPushButton("<")
+        self.btn_step_back = QPushButton()
         self.btn_step_back.setToolTip("Step Backward 1 Frame (Left Arrow)")
-        self.btn_step_back.setFixedWidth(36)
+        self.btn_step_back.setFixedSize(36, 32)
+        self.btn_step_back.setStyleSheet("padding: 4px;")
+        self.btn_step_back.setIconSize(QSize(18, 18))
         self.btn_step_back.clicked.connect(self.playback.step_backward)
         layout.addWidget(self.btn_step_back)
 
         # Play / Pause
-        self.btn_play_pause = QPushButton("Play")
+        self.btn_play_pause = QPushButton()
         self.btn_play_pause.setObjectName("primaryBtn")
         self.btn_play_pause.setToolTip("Play / Pause (Spacebar)")
-        self.btn_play_pause.setFixedWidth(80)
+        self.btn_play_pause.setFixedSize(46, 32)
+        self.btn_play_pause.setStyleSheet("padding: 4px;")
+        self.btn_play_pause.setIconSize(QSize(18, 18))
         self.btn_play_pause.clicked.connect(self.playback.toggle_play_pause)
         layout.addWidget(self.btn_play_pause)
 
         # Step forward 1 frame
-        self.btn_step_fwd = QPushButton(">")
+        self.btn_step_fwd = QPushButton()
         self.btn_step_fwd.setToolTip("Step Forward 1 Frame (Right Arrow)")
-        self.btn_step_fwd.setFixedWidth(36)
+        self.btn_step_fwd.setFixedSize(36, 32)
+        self.btn_step_fwd.setStyleSheet("padding: 4px;")
+        self.btn_step_fwd.setIconSize(QSize(18, 18))
         self.btn_step_fwd.clicked.connect(self.playback.step_forward)
         layout.addWidget(self.btn_step_fwd)
 
-        # Jump to end
-        self.btn_jump_end = QPushButton(">|")
-        self.btn_jump_end.setToolTip("Jump to End (End)")
-        self.btn_jump_end.setFixedWidth(36)
-        self.btn_jump_end.clicked.connect(self.playback.jump_to_end)
-        layout.addWidget(self.btn_jump_end)
-
-        # Stop
-        self.btn_stop = QPushButton("■")
-        self.btn_stop.setToolTip("Stop and Return to Start")
-        self.btn_stop.setFixedWidth(36)
-        self.btn_stop.clicked.connect(self.playback.stop)
-        layout.addWidget(self.btn_stop)
+        self._update_playback_icons()
 
         layout.addSpacing(12)
 
@@ -198,6 +198,39 @@ class MainWindow(QMainWindow):
         self.lbl_rates = QLabel("Point: --- Hz | Analog: --- Hz")
         self.lbl_rates.setStyleSheet("color: #8C96AB; font-size: 11px;")
         layout.addWidget(self.lbl_rates)
+
+    def _get_tinted_icon(self, icon_name: str, color_hex: str) -> QIcon:
+        """Load an icon PNG from assets/icons/ and tint its alpha silhouette with color_hex."""
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons", f"{icon_name}.png")
+        if not os.path.exists(icon_path):
+            return QIcon()
+        img = QImage(icon_path)
+        if img.isNull():
+            return QIcon()
+        tinted = QImage(img.size(), QImage.Format_ARGB32_Premultiplied)
+        tinted.fill(Qt.transparent)
+        painter = QPainter(tinted)
+        painter.drawImage(0, 0, img)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), QColor(color_hex))
+        painter.end()
+        return QIcon(QPixmap.fromImage(tinted))
+
+    def _update_playback_icons(self):
+        """Update playback toolbar button icons and tints according to the current theme."""
+        theme_dict = get_theme(self.current_theme_name)
+        is_dark = theme_dict.get("is_dark", True)
+        primary_color = "#FFFFFF"
+        step_color = "#ECEFF4" if is_dark else "#1C274C"
+
+        if hasattr(self, 'btn_step_back'):
+            self.btn_step_back.setIcon(self._get_tinted_icon("previous", step_color))
+        if hasattr(self, 'btn_step_fwd'):
+            self.btn_step_fwd.setIcon(self._get_tinted_icon("next", step_color))
+        if hasattr(self, 'btn_play_pause'):
+            is_playing = getattr(self.playback, "is_playing", False) if hasattr(self, 'playback') else False
+            play_icon = "pause" if is_playing else "play"
+            self.btn_play_pause.setIcon(self._get_tinted_icon(play_icon, primary_color))
 
     def _setup_menus(self):
         """Construct File, Edit, View, Tools, Help menus."""
@@ -253,28 +286,15 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        # Settings Submenu (under File menu)
-        settings_menu = file_menu.addMenu("&Settings")
-        settings_menu.menuAction().setMenuRole(QAction.NoRole)
+        file_menu.addSeparator()
 
-        # Playback speed submenu
-        speed_menu = settings_menu.addMenu("Playback Speed")
-        speed_menu.menuAction().setMenuRole(QAction.NoRole)
-        for spd_txt in ["0.1x", "0.25x", "0.5x", "1.0x", "1.5x", "2.0x"]:
-            act_s = QAction(spd_txt, self)
-            act_s.setMenuRole(QAction.NoRole)
-            act_s.triggered.connect(lambda checked, s=spd_txt: self.combo_speed.setCurrentText(s))
-            speed_menu.addAction(act_s)
-
-        act_visual_conf = QAction("&Visual Configurations...", self)
-        act_visual_conf.setMenuRole(QAction.NoRole)
-        act_visual_conf.triggered.connect(lambda: self.open_settings_dialog(0))
-        settings_menu.addAction(act_visual_conf)
-
-        act_ground_conf = QAction("&Ground Reaction & Orientation...", self)
-        act_ground_conf.setMenuRole(QAction.NoRole)
-        act_ground_conf.triggered.connect(lambda: self.open_settings_dialog(1))
-        settings_menu.addAction(act_ground_conf)
+        # Settings Action (opens main settings window directly with no submenus)
+        act_settings = QAction("&Settings...", self)
+        act_settings.setMenuRole(QAction.NoRole)
+        act_settings.setShortcut(QKeySequence.Preferences)
+        act_settings.setStatusTip("Open the main settings configuration window")
+        act_settings.triggered.connect(lambda: self.open_settings_dialog(0))
+        file_menu.addAction(act_settings)
 
         file_menu.addSeparator()
 
@@ -283,47 +303,30 @@ class MainWindow(QMainWindow):
         act_exit.triggered.connect(self.close)
         file_menu.addAction(act_exit)
 
+
         # ---------------- EDIT MENU ----------------
-        edit_menu = menubar.addMenu("&Edit")
+        # Use invisible zero-width space on macOS so AppKit does not inject AutoFill or other system items
+        edit_title = "&Edit\u200b" if sys.platform == "darwin" else "&Edit"
+        edit_menu = menubar.addMenu(edit_title)
+
         if sys.platform == "darwin":
             from gui.macos_utils import clean_macos_edit_menu
             edit_menu.aboutToShow.connect(clean_macos_edit_menu)
 
-        act_undo = QAction("&Undo", self)
-        act_undo.setShortcut(QKeySequence.Undo)
-        act_undo.setEnabled(False)
-        edit_menu.addAction(act_undo)
+        self.act_undo = self.undo_stack.createUndoAction(self, "&Undo")
+        self.act_undo.setShortcut(QKeySequence.Undo)
+        edit_menu.addAction(self.act_undo)
 
-        act_redo = QAction("&Redo", self)
-        act_redo.setShortcut(QKeySequence.Redo)
-        act_redo.setEnabled(False)
-        edit_menu.addAction(act_redo)
+        self.act_redo = self.undo_stack.createRedoAction(self, "&Redo")
+        self.act_redo.setShortcuts([QKeySequence.Redo, QKeySequence("Ctrl+Y")])
+        edit_menu.addAction(self.act_redo)
 
         edit_menu.addSeparator()
 
-        act_cut = QAction("Cu&t", self)
-        act_cut.setShortcut(QKeySequence.Cut)
-        act_cut.setEnabled(False)
-        edit_menu.addAction(act_cut)
+        act_summary = QAction("Export Summary Report...", self)
+        act_summary.triggered.connect(self.export_summary_report)
+        edit_menu.addAction(act_summary)
 
-        act_copy = QAction("&Copy", self)
-        act_copy.setShortcut(QKeySequence.Copy)
-        edit_menu.addAction(act_copy)
-
-        act_paste = QAction("&Paste", self)
-        act_paste.setShortcut(QKeySequence.Paste)
-        act_paste.setEnabled(False)
-        edit_menu.addAction(act_paste)
-
-        act_sel_all = QAction("Select &All", self)
-        act_sel_all.setShortcut(QKeySequence.SelectAll)
-        edit_menu.addAction(act_sel_all)
-
-        edit_menu.addSeparator()
-
-        act_options = QAction("&Options...", self)
-        act_options.triggered.connect(self.open_settings_dialog)
-        edit_menu.addAction(act_options)
 
         # ---------------- VIEW MENU ----------------
         view_menu = menubar.addMenu("&View")
@@ -449,6 +452,11 @@ class MainWindow(QMainWindow):
 
         marker_menu = tools_menu.addMenu("&Marker")
 
+        act_add_marker = QAction("&Add Marker...", self)
+        act_add_marker.setStatusTip("Add a new marker with custom coordinates, txt/csv/excel file, and color")
+        act_add_marker.triggered.connect(self.open_add_marker_dialog)
+        marker_menu.addAction(act_add_marker)
+
         act_avg_marker = QAction("Create &Average Marker...", self)
         act_avg_marker.triggered.connect(self.open_average_marker_dialog)
         marker_menu.addAction(act_avg_marker)
@@ -470,12 +478,6 @@ class MainWindow(QMainWindow):
         act_color_marker = QAction("Change Marker &Color...", self)
         act_color_marker.triggered.connect(self.side_panel._action_change_marker_color)
         marker_menu.addAction(act_color_marker)
-
-        tools_menu.addSeparator()
-
-        act_summary = QAction("Export Summary Report...", self)
-        act_summary.triggered.connect(self.export_summary_report)
-        tools_menu.addAction(act_summary)
 
         # ---------------- HELP MENU ----------------
         help_menu = menubar.addMenu("&Help")
@@ -517,18 +519,28 @@ class MainWindow(QMainWindow):
         # Side panel interactions
         self.side_panel.markerVisibilityChanged.connect(self.viewer_3d.toggle_marker_visibility)
         self.side_panel.markersSelected.connect(self.viewer_3d.select_markers)
+        self.side_panel.addMarkerRequested.connect(self.open_add_marker_dialog)
         self.side_panel.markerRenamed.connect(self._on_marker_renamed)
+        self.side_panel.deleteMarkerRequested.connect(self.delete_marker)
+        self.side_panel.deleteMarkersRequested.connect(self.delete_marker)
+        self.side_panel.plotMarkerRequested.connect(self.plot_marker)
+        self.side_panel.plotMarkersRequested.connect(self.plot_markers)
+        self.side_panel.plotDistanceRequested.connect(self.plot_marker_distance)
         self.side_panel.markersColorChanged.connect(self._on_markers_color_changed)
         self.side_panel.eventSelected.connect(self._on_event_selected)
         self.side_panel.addEventRequested.connect(lambda: self.add_event_dialog(self.playback.current_frame))
         self.side_panel.editEventRequested.connect(self.edit_event_dialog)
         self.side_panel.deleteEventRequested.connect(self.delete_event)
+        self.side_panel.deleteEventsRequested.connect(self.delete_event)
 
         # Timeline Trim / Cut range synchronization
         self.timeline.trimRangeChanged.connect(self._on_trim_range_changed)
+        if hasattr(self, 'plot_panel'):
+            self.plot_panel.trimRangeChanged.connect(self._on_plot_roi_changed)
 
         # 3D Viewer interactive picking -> Side panel synchronization
         self.viewer_3d.markersSelected.connect(self._on_3d_markers_selected)
+        self.viewer_3d.markerContextMenuRequested.connect(self._on_3d_marker_context_menu)
 
     def _on_trim_range_changed(self, start_f: int, end_f: int):
         if not self.trial:
@@ -537,9 +549,33 @@ class MainWindow(QMainWindow):
         if is_trimmed:
             cnt = end_f - start_f + 1
             sec = cnt / self.trial.point_rate if self.trial.point_rate > 0 else 0.0
-            self.status.showMessage(f"Cut region: Frames {start_f} to {end_f} ({cnt} frames, {sec:.3f}s) — Export will include this range only.", 3000)
+            self.status.showMessage(f"Cut / ROI region: Frames {start_f} to {end_f} ({cnt} frames, {sec:.3f}s) — Export will include this range only.", 3000)
         else:
-            self.status.showMessage("Cut region reset to full trial", 2000)
+            self.status.showMessage("Cut / ROI region reset to full trial", 2000)
+
+        # Synchronize active measurement dialogs with new ROI range
+        if self.dist_dialog and self.dist_dialog.isVisible():
+            self.dist_dialog.set_trim_range(start_f, end_f)
+        if self.angle_dialog and self.angle_dialog.isVisible():
+            self.angle_dialog.set_trim_range(start_f, end_f)
+
+        # Synchronize all active measurement plot windows
+        for win in self.measurement_plot_windows:
+            if win.isVisible():
+                win.set_trim_range(start_f, end_f)
+
+        # Synchronize 2D PlotPanel
+        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
+            self.plot_panel.set_trim_range(start_f, end_f)
+
+        # Synchronize UniversalPlotterWindow
+        if self.plotter_window and (self.plotter_window.isVisible() or not self.plotter_window.isHidden()):
+            self.plotter_window.set_trim_range(start_f, end_f)
+
+    def _on_plot_roi_changed(self, start_f: int, end_f: int):
+        """Synchronize timeline trim when ROI is dragged on a plot window or panel."""
+        if hasattr(self, 'timeline'):
+            self.timeline.set_trim_range(start_f, end_f)
 
     # ---------------------------------------------------------
     # Frame & Time Synchronization
@@ -570,13 +606,20 @@ class MainWindow(QMainWindow):
             self.angle_dialog.update_frame(frame_idx)
         if self.plotter_window and (self.plotter_window.isVisible() or not self.plotter_window.isHidden()):
             self.plotter_window.update_frame(frame_idx)
+        for m_win in list(self.measurement_plot_windows):
+            if m_win.isVisible():
+                m_win.update_frame(frame_idx)
+            else:
+                self.measurement_plot_windows.remove(m_win)
 
         # 6. Update Playback Toolbar Labels
         self.lbl_frame_info.setText(f"Frame: {frame_idx} / {self.trial.point_frame_count - 1}")
         self.lbl_time_info.setText(f"Time: {cur_time:.3f} s / {self.trial.duration_seconds:.3f} s")
 
     def _on_playback_state_changed(self, is_playing: bool):
-        self.btn_play_pause.setText("Pause" if is_playing else "Play")
+        play_icon = "pause" if is_playing else "play"
+        self.btn_play_pause.setIcon(self._get_tinted_icon(play_icon, "#FFFFFF"))
+        self.btn_play_pause.setToolTip("Pause (Spacebar)" if is_playing else "Play / Pause (Spacebar)")
 
     def _on_plot_cursor_moved(self, time_s: float):
         if self.trial:
@@ -594,43 +637,34 @@ class MainWindow(QMainWindow):
         speed_map = {"0.1x": 0.1, "0.25x": 0.25, "0.5x": 0.5, "1.0x": 1.0, "1.5x": 1.5, "2.0x": 2.0}
         val = speed_map.get(text, 1.0)
         self.playback.set_speed(val)
+        self._default_speed = text
+        self._save_settings({"default_speed": text})
 
     def _on_loop_toggled(self):
         is_loop = self.btn_loop.isChecked()
         self.btn_loop.setText("Loop: ON" if is_loop else "Loop: OFF")
         self.playback.set_loop(is_loop)
+        self._save_settings({"loop": is_loop})
 
     # ---------------------------------------------------------
     # Marker Tools & Measurements
     # ---------------------------------------------------------
     def _on_marker_renamed(self, old_name: str, new_name: str):
-        if self.trial and old_name in self.trial.markers:
-            self.trial.markers[new_name] = self.trial.markers.pop(old_name)
-            self.viewer_3d.rename_marker(old_name, new_name)
-            if self.plotter_window and self.plotter_window.isVisible():
-                self.plotter_window.load_trial(self.trial)
-            self.status.showMessage(f"Renamed marker '{old_name}' -> '{new_name}'", 3000)
+        if getattr(self, '_is_undo_redo_running', False):
+            return
+        cmd = RenameMarkerCommand(self, self.trial, old_name, new_name)
+        self.undo_stack.push(cmd)
 
     def _on_marker_color_changed(self, marker_name: str, qcolor):
         self._on_markers_color_changed([marker_name], qcolor)
 
     def _on_markers_color_changed(self, marker_names: List[str], qcolor):
-        if not marker_names:
+        if not marker_names or getattr(self, '_is_undo_redo_running', False):
             return
-        if qcolor is None:
-            self.viewer_3d.set_markers_custom_colors(marker_names, None)
-            if len(marker_names) == 1:
-                self.status.showMessage(f"Reset color for marker '{marker_names[0]}'", 3000)
-            else:
-                self.status.showMessage(f"Reset color for {len(marker_names)} markers", 3000)
-        else:
-            rgba = (qcolor.redF(), qcolor.greenF(), qcolor.blueF(), qcolor.alphaF())
-            self.viewer_3d.set_markers_custom_colors(marker_names, rgba)
-            hex_color = qcolor.name().upper()
-            if len(marker_names) == 1:
-                self.status.showMessage(f"Changed color for marker '{marker_names[0]}' to {hex_color}", 3000)
-            else:
-                self.status.showMessage(f"Changed color for {len(marker_names)} markers to {hex_color}", 3000)
+        old_colors = {m: self.viewer_3d.custom_marker_colors.get(m, None) for m in marker_names}
+        rgba = (qcolor.redF(), qcolor.greenF(), qcolor.blueF(), qcolor.alphaF()) if qcolor is not None else None
+        cmd = ChangeMarkerColorCommand(self, marker_names, old_colors, rgba)
+        self.undo_stack.push(cmd)
 
     def _on_3d_markers_selected(self, names: List[str]):
         """Synchronize marker selection from 3D viewport to side panel and status bar."""
@@ -642,6 +676,25 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(f"Selected markers ({len(names)}): {', '.join(names)}", 3000)
         else:
             self.status.showMessage("Cleared marker selection", 2000)
+
+    def _on_3d_marker_context_menu(self, global_pos: QPoint, marker_names: List[str]):
+        """Forward 3D viewport right-click marker context menu request to side panel."""
+        self.side_panel.show_marker_context_menu(global_pos, marker_names)
+
+    def open_add_marker_dialog(self):
+        """Open dialog to add a new marker with custom coordinates/file and color."""
+        if not self.trial:
+            QMessageBox.information(self, "Add Marker", "Please load a C3D trial first.")
+            return
+
+        dlg = AddMarkerDialog(self.trial, parent=self)
+        dlg.markerAdded.connect(self._on_marker_added)
+        dlg.exec()
+
+    def _on_marker_added(self, name: str, data: np.ndarray, color: Optional[QColor]):
+        rgba = (color.redF(), color.greenF(), color.blueF(), color.alphaF()) if color else None
+        cmd = AddMarkerCommand(self, self.trial, name, data, rgba)
+        self.undo_stack.push(cmd)
 
     def open_average_marker_dialog(self):
         if not self.trial or not self.trial.markers:
@@ -655,11 +708,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
 
     def _on_average_marker_created(self, name: str, data: np.ndarray):
-        if self.trial:
-            self.trial.markers[name] = data
-            self.side_panel.add_marker_entry(name)
-            self.viewer_3d.set_frame(self.playback.current_frame)
-            self.status.showMessage(f"Created average marker '{name}' successfully", 4000)
+        cmd = AddMarkerCommand(self, self.trial, name, data)
+        self.undo_stack.push(cmd)
 
     def open_measure_distance_dialog(self):
         if not self.trial or not self.trial.markers:
@@ -668,12 +718,14 @@ class MainWindow(QMainWindow):
         selected = self.side_panel.get_selected_markers()
         if not selected and hasattr(self.viewer_3d, 'selected_markers'):
             selected = list(self.viewer_3d.selected_markers)
+        trim_rng = (self.timeline.trim_start_frame, self.timeline.trim_end_frame) if hasattr(self, 'timeline') else None
         self.dist_dialog = MeasureDistanceDialog(
             self.trial, current_frame=self.playback.current_frame,
-            preselected=selected, parent=self
+            preselected=selected, trim_range=trim_rng, parent=self
         )
         self.dist_dialog.visualize3DRequested.connect(self.viewer_3d.set_distance_measurement)
         self.dist_dialog.plotRequested.connect(self.plot_panel.add_custom_curve)
+        self.dist_dialog.openPlotWindowRequested.connect(self.show_measurement_plot)
         self.dist_dialog.show()
 
     def open_measure_angle_dialog(self):
@@ -683,13 +735,61 @@ class MainWindow(QMainWindow):
         selected = self.side_panel.get_selected_markers()
         if not selected and hasattr(self.viewer_3d, 'selected_markers'):
             selected = list(self.viewer_3d.selected_markers)
+        trim_rng = (self.timeline.trim_start_frame, self.timeline.trim_end_frame) if hasattr(self, 'timeline') else None
         self.angle_dialog = MeasureAngleDialog(
             self.trial, current_frame=self.playback.current_frame,
-            preselected=selected, parent=self
+            preselected=selected, trim_range=trim_rng, parent=self
         )
         self.angle_dialog.visualize3DRequested.connect(self.viewer_3d.set_angle_measurement)
         self.angle_dialog.plotRequested.connect(self.plot_panel.add_custom_curve)
+        self.angle_dialog.openPlotWindowRequested.connect(self.show_measurement_plot)
         self.angle_dialog.show()
+
+    def show_measurement_plot(
+        self,
+        title: str,
+        y_data: np.ndarray,
+        unit: str = "mm",
+        curve_type: str = "Distance",
+        trim_range: Optional[Tuple[int, int]] = None
+    ):
+        """Instantly pop up a dedicated high-resolution curve plot window with ROI highlighting."""
+        cur_f = self.playback.current_frame if self.trial else 0
+        point_rate = self.trial.point_rate if self.trial else 100.0
+        if trim_range is None and hasattr(self, 'timeline'):
+            trim_range = (self.timeline.trim_start_frame, self.timeline.trim_end_frame)
+
+        win = MeasurementPlotWindow(
+            title=title,
+            y_data=y_data,
+            point_rate=point_rate,
+            unit=unit,
+            curve_type=curve_type,
+            current_frame=cur_f,
+            trim_range=trim_range,
+            parent=None
+        )
+        win.timeCursorMoved.connect(self._on_plot_cursor_moved)
+        win.trimRangeChanged.connect(self._on_plot_roi_changed)
+        win.windowClosed.connect(lambda: self._on_measurement_window_closed(win))
+        theme_dict = get_theme(self.current_theme_name)
+        if hasattr(win, "plot_widget"):
+            win.plot_widget.setBackground(theme_dict.get("plot_bg", "#151720"))
+        win.show()
+        win.raise_()
+        win.activateWindow()
+        self.measurement_plot_windows.append(win)
+        self.status.showMessage(f"Opened plot window for {title}", 3000)
+
+    def _on_measurement_window_closed(self, win):
+        if win in self.measurement_plot_windows:
+            self.measurement_plot_windows.remove(win)
+        has_other_dist = any(
+            isinstance(w, MeasurementPlotWindow) and w.curve_type == "Distance" and w.isVisible()
+            for w in self.measurement_plot_windows
+        )
+        if not has_other_dist and hasattr(self, 'viewer_3d'):
+            self.viewer_3d.set_distance_measurement("", "", False)
 
     def open_plotter_window(self):
         """Open or bring to focus the Universal Plotter Window."""
@@ -697,14 +797,84 @@ class MainWindow(QMainWindow):
             cur_f = self.playback.current_frame if self.trial else 0
             self.plotter_window = UniversalPlotterWindow(self.trial, current_frame=cur_f, parent=None)
             self.plotter_window.timeCursorMoved.connect(self._on_plot_cursor_moved)
+            self.plotter_window.trimRangeChanged.connect(self._on_plot_roi_changed)
+            if hasattr(self, 'current_theme_name'):
+                self.plotter_window.apply_theme(get_theme(self.current_theme_name))
         else:
             if self.trial and self.plotter_window.trial != self.trial:
                 self.plotter_window.load_trial(self.trial)
+        if hasattr(self, 'timeline'):
+            self.plotter_window.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
         self.plotter_window.show()
         self.plotter_window.raise_()
         self.plotter_window.activateWindow()
         if self.trial:
             self.plotter_window.update_frame(self.playback.current_frame)
+
+    def plot_marker(self, marker_name: str):
+        """Immediately open plotter window and plot X, Y, Z coordinates of marker."""
+        if not self.trial or not marker_name:
+            return
+        if marker_name not in self.trial.markers:
+            return
+
+        self.open_plotter_window()
+        if self.plotter_window:
+            self.plotter_window.plot_marker_coordinates(marker_name, components=("X", "Y", "Z"), clear_others=True)
+
+        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
+            self.plot_panel.plot_marker(marker_name, self.trial.markers[marker_name])
+
+        self.status.showMessage(f"Plotted coordinates for marker: {marker_name} (X, Y, Z)", 3000)
+
+    def plot_markers(self, marker_names: List[str]):
+        """Immediately open plotter window and plot X, Y, Z coordinates of multiple markers."""
+        if not self.trial or not marker_names:
+            return
+        valid_markers = [m for m in marker_names if m in self.trial.markers]
+        if not valid_markers:
+            return
+
+        self.open_plotter_window()
+        if self.plotter_window:
+            self.plotter_window.plot_markers_coordinates(valid_markers, components=("X", "Y", "Z"), clear_others=True)
+
+        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
+            for m in valid_markers:
+                self.plot_panel.plot_marker(m, self.trial.markers[m])
+
+        self.status.showMessage(f"Plotted coordinates for {len(valid_markers)} markers (X, Y, Z)", 3000)
+
+    def plot_marker_distance(self, m1: str, m2: str):
+        """Calculate frame-by-frame Euclidean distance between two markers and plot it."""
+        if not self.trial or not m1 or not m2:
+            return
+        if m1 not in self.trial.markers or m2 not in self.trial.markers:
+            return
+
+        from gui.marker_tools_dialog import compute_distance_trajectory
+        d1 = self.trial.markers[m1]
+        d2 = self.trial.markers[m2]
+        dist_traj = compute_distance_trajectory(d1, d2)
+        title = f"Distance: {m1} ↔ {m2}"
+
+        trim_rng = (self.timeline.trim_start_frame, self.timeline.trim_end_frame) if hasattr(self, 'timeline') else None
+
+        # 1. Pop up dedicated MeasurementPlotWindow (showing Euclidean distance, live stats & playhead sync)
+        self.show_measurement_plot(title, dist_traj, unit="mm", curve_type="Distance", trim_range=trim_rng)
+
+        # 2. Draw 3D measurement line & label in the 3D viewer
+        self.viewer_3d.set_distance_measurement(m1, m2, True)
+
+        # 3. Update docked plot_panel if open
+        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
+            self.plot_panel.add_custom_curve(title, dist_traj)
+
+        # 4. If UniversalPlotterWindow is open, update it as well
+        if self.plotter_window and (self.plotter_window.isVisible() or not self.plotter_window.isHidden()):
+            self.plotter_window.plot_distance(m1, m2, dist_traj, clear_others=False)
+
+        self.status.showMessage(f"Plotted Euclidean distance between {m1} and {m2}", 3000)
 
     # ---------------------------------------------------------
     # Event Management
@@ -718,6 +888,13 @@ class MainWindow(QMainWindow):
         self.timeline.set_current_frame(self.playback.current_frame)
         self.plot_panel.reload_events()
         self.side_panel._populate_events()
+        self._update_status_stats()
+
+    def _update_status_stats(self):
+        """Update permanent status bar stats widget."""
+        if not self.trial:
+            self.lbl_status_stats.setText("")
+            return
         self.lbl_status_stats.setText(
             f"Markers: {len(self.trial.markers)} | Analogs: {len(self.trial.analogs)} | "
             f"Force Plates: {len(self.trial.force_platforms)} | Events: {len(self.trial.events)} | "
@@ -734,9 +911,8 @@ class MainWindow(QMainWindow):
         dlg = EventEditDialog(trial=self.trial, current_frame=target_frame, parent=self)
         if dlg.exec():
             new_ev = dlg.get_event()
-            self.trial.events.append(new_ev)
-            self._refresh_event_views()
-            self.status.showMessage(f"Added event '{new_ev.display_name}' at frame {new_ev.frame}", 3500)
+            cmd = AddEventCommand(self, self.trial, new_ev)
+            self.undo_stack.push(cmd)
 
     def edit_event_dialog(self, event: C3DEvent):
         """Prompt user to edit an existing event."""
@@ -745,27 +921,78 @@ class MainWindow(QMainWindow):
 
         dlg = EventEditDialog(trial=self.trial, current_frame=event.frame, event_to_edit=event, parent=self)
         if dlg.exec():
-            idx = self.trial.events.index(event)
             updated_ev = dlg.get_event()
-            self.trial.events[idx] = updated_ev
-            self._refresh_event_views()
-            self.status.showMessage(f"Updated event '{updated_ev.display_name}'", 3500)
+            cmd = EditEventCommand(self, self.trial, event, updated_ev)
+            self.undo_stack.push(cmd)
 
-    def delete_event(self, event: C3DEvent):
-        """Confirm and delete a discrete event."""
-        if not self.trial or event not in self.trial.events:
+    def delete_event(self, event_or_events):
+        """Confirm and delete one or multiple discrete events."""
+        if not self.trial:
             return
+
+        if isinstance(event_or_events, (list, tuple)):
+            events = [e for e in event_or_events if e in self.trial.events]
+        else:
+            events = [event_or_events] if event_or_events in self.trial.events else []
+
+        if not events:
+            return
+
+        if len(events) == 1:
+            title = "Delete Event"
+            prompt = f"Are you sure you want to delete event '{events[0].display_name}' at frame {events[0].frame}?"
+        else:
+            title = "Delete Events"
+            prompt = f"Are you sure you want to delete all {len(events)} selected events?"
 
         confirm = QMessageBox.question(
             self,
-            "Delete Event",
-            f"Are you sure you want to delete event '{event.display_name}' at frame {event.frame}?",
+            title,
+            prompt,
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
-            self.trial.events.remove(event)
-            self._refresh_event_views()
-            self.status.showMessage(f"Deleted event '{event.display_name}'", 3500)
+            if len(events) == 1:
+                cmd = DeleteEventCommand(self, self.trial, events[0])
+            else:
+                cmd = DeleteEventsCommand(self, self.trial, events)
+            self.undo_stack.push(cmd)
+
+    def delete_marker(self, marker_or_markers, confirm: bool = True):
+        """Confirm and delete one or multiple markers with full undo/redo."""
+        if not self.trial or not self.trial.markers:
+            return
+
+        if isinstance(marker_or_markers, (list, tuple, set)):
+            markers = [m for m in marker_or_markers if m in self.trial.markers]
+        else:
+            markers = [marker_or_markers] if marker_or_markers in self.trial.markers else []
+
+        if not markers:
+            return
+
+        if len(markers) == 1:
+            title = "Delete Marker"
+            prompt = f"Are you sure you want to delete marker '{markers[0]}'?"
+        else:
+            title = "Delete Markers"
+            prompt = f"Are you sure you want to delete all {len(markers)} selected markers?"
+
+        if confirm:
+            res = QMessageBox.question(
+                self,
+                title,
+                prompt,
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if res != QMessageBox.Yes:
+                return
+
+        if len(markers) == 1:
+            cmd = DeleteMarkerCommand(self, self.trial, markers[0])
+        else:
+            cmd = DeleteMarkersCommand(self, self.trial, markers)
+        self.undo_stack.push(cmd)
 
     def manage_events_dialog(self):
         """Open full table Event Manager dialog."""
@@ -773,11 +1000,22 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Event Manager", "Please load a C3D trial first.")
             return
 
+        initial_events = [
+            C3DEvent(e.time, e.frame, e.name, e.description, e.icon_color, getattr(e, 'subject', ''), getattr(e, 'context', ''))
+            for e in self.trial.events
+        ]
         dlg = EventManagerDialog(self.trial, current_frame=self.playback.current_frame, parent=self)
         dlg.eventListChanged.connect(self._refresh_event_views)
         dlg.seekRequested.connect(self.playback.set_frame)
         dlg.exec()
         self._refresh_event_views()
+        new_events = [
+            C3DEvent(e.time, e.frame, e.name, e.description, e.icon_color, getattr(e, 'subject', ''), getattr(e, 'context', ''))
+            for e in self.trial.events
+        ]
+        if [(e.name, e.frame, round(e.time, 4)) for e in initial_events] != [(e.name, e.frame, round(e.time, 4)) for e in new_events]:
+            cmd = EventsBatchCommand(self, self.trial, initial_events, new_events)
+            self.undo_stack.push(cmd)
 
     def clear_all_events(self):
         """Remove all events from the active trial."""
@@ -792,9 +1030,9 @@ class MainWindow(QMainWindow):
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.Yes:
-            self.trial.events.clear()
-            self._refresh_event_views()
-            self.status.showMessage("Cleared all events from trial", 3500)
+            saved = list(self.trial.events)
+            cmd = ClearEventsCommand(self, self.trial, saved)
+            self.undo_stack.push(cmd)
 
     # ---------------------------------------------------------
     # File Operations
@@ -813,6 +1051,7 @@ class MainWindow(QMainWindow):
             trial = C3DReader.read(file_path)
             self.trial = trial
             self.current_file_path = file_path
+            self.undo_stack.clear()
 
             # Configure Playback Controller
             self.playback.set_trial(trial.point_frame_count, trial.point_rate)
@@ -1007,16 +1246,39 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if app:
             app.setStyleSheet(theme_dict["qss"])
+            app.setPalette(create_theme_palette(theme_dict))
         self.viewer_3d.apply_theme(theme_dict)
         self.plot_panel.apply_theme(theme_dict)
+        self.side_panel.apply_theme(theme_dict)
+        if hasattr(self, 'timeline'):
+            self.timeline.apply_theme(theme_dict)
         if self.plotter_window:
             self.plotter_window.apply_theme(theme_dict)
+        for m_win in self.measurement_plot_windows:
+            if hasattr(m_win, "plot_widget"):
+                m_win.plot_widget.setBackground(theme_dict.get("plot_bg", "#151720"))
         self.current_theme_name = theme_name
+        is_dark = theme_dict.get("is_dark", True)
+        if not is_dark:
+            self.side_panel.set_default_marker_color(QColor("#000000"))
+        else:
+            if getattr(self.viewer_3d, "marker_color", None) and self.viewer_3d.marker_color[:3] == (1.0, 1.0, 1.0):
+                self.side_panel.set_default_marker_color(QColor("#FFFFFF"))
+        if hasattr(self, 'lbl_frame_info'):
+            self.lbl_frame_info.setStyleSheet(f"font-weight: 600; color: {'#ECEFF4' if is_dark else '#2E3440'};")
+        accent = theme_dict.get("accent", "#00ADB5" if is_dark else "#0284C7")
+        if hasattr(self, 'lbl_time_info'):
+            self.lbl_time_info.setStyleSheet(f"color: {accent}; font-weight: 600;")
+        if hasattr(self, 'lbl_rates'):
+            self.lbl_rates.setStyleSheet(f"color: {'#8C96AB' if is_dark else '#6B7280'}; font-size: 11px;")
+        self._update_playback_icons()
         if hasattr(self, 'theme_actions') and theme_name in self.theme_actions:
             self.theme_actions[theme_name].setChecked(True)
         self.status.showMessage(f"Applied theme: {theme_name}", 3000)
+        self._save_settings({"theme": theme_name})
 
-    def open_settings_dialog(self, initial_tab: int = 0):
+    def _collect_current_app_settings(self) -> dict:
+        """Collect all current user settings into a clean dictionary."""
         antialias_val = False
         if 'pg' in globals() and hasattr(pg, 'getConfigOption'):
             try:
@@ -1024,8 +1286,11 @@ class MainWindow(QMainWindow):
             except Exception:
                 antialias_val = False
 
-        current_cfg = {
+        bg_choice = getattr(self, '_viewport_bg_choice', "Theme Default")
+        return {
             "theme": self.current_theme_name,
+            "viewport_bg_choice": bg_choice,
+            "viewport_bg": getattr(self, '_viewport_bg', None),
             "show_grid": self.viewer_3d.show_grid,
             "grid_spacing": getattr(self.viewer_3d, 'grid_spacing', 500.0),
             "show_markers": self.viewer_3d.show_markers,
@@ -1035,22 +1300,39 @@ class MainWindow(QMainWindow):
             "axis_line_width": getattr(self.viewer_3d, 'axis_line_width', 2.0),
             "axis_length": getattr(self.viewer_3d, 'axis_length', 320.0),
             "show_plate_axes": self.viewer_3d.show_plate_axes,
+            "z_up": getattr(self.viewer_3d, 'z_up', True),
+            "ground_rotation": getattr(self.viewer_3d, 'ground_rotation', 0.0),
             "marker_size": self.viewer_3d.marker_size,
+            "marker_color": list(getattr(self.viewer_3d, 'marker_color', (1.0, 1.0, 1.0, 1.0))),
+            "marker_color_name": getattr(self, '_marker_color_name', None),
             "grf_vector_scale": self.viewer_3d.grf_vector_scale,
             "grf_threshold_n": self.viewer_3d.grf_threshold_n,
+            "grf_color": list(getattr(self.viewer_3d, 'grf_color', (1.0, 0.35, 0.08, 1.0))),
+            "grf_color_name": getattr(self, '_grf_color_name', None),
+            "default_speed": getattr(self, '_default_speed', "1.0x (Real-time)"),
             "loop": self.playback.is_looping,
             "plot_antialias": antialias_val,
         }
+
+    def open_settings_dialog(self, initial_tab: int = 0):
+        current_cfg = self._collect_current_app_settings()
         tab_idx = initial_tab if isinstance(initial_tab, int) else 0
         dlg = SettingsDialog(current_cfg, self, initial_tab=tab_idx)
         dlg.settingsApplied.connect(self._apply_settings)
         dlg.exec()
 
-    def _apply_settings(self, cfg: dict):
+    def _apply_settings(self, cfg: dict, save_to_disk: bool = True):
         if "theme" in cfg and cfg["theme"] != self.current_theme_name:
             self.apply_theme(cfg["theme"])
-        if "viewport_bg" in cfg and cfg["viewport_bg"]:
-            self.viewer_3d.set_viewport_bg(cfg["viewport_bg"])
+        if "viewport_bg_choice" in cfg:
+            self._viewport_bg_choice = cfg["viewport_bg_choice"]
+        if "viewport_bg" in cfg:
+            self._viewport_bg = cfg["viewport_bg"]
+            if cfg["viewport_bg"]:
+                self.viewer_3d.set_viewport_bg(cfg["viewport_bg"])
+            else:
+                theme_dict = get_theme(self.current_theme_name)
+                self.viewer_3d.set_viewport_bg(theme_dict.get("viewport_bg", "#151720"))
         if "axis_line_width" in cfg:
             self.viewer_3d.set_axis_line_width(cfg["axis_line_width"])
         if "axis_length" in cfg:
@@ -1059,6 +1341,10 @@ class MainWindow(QMainWindow):
             self.viewer_3d.set_show_global_axes(cfg["show_global_axes"])
         if "show_plate_axes" in cfg:
             self.viewer_3d.set_show_plate_axes(cfg["show_plate_axes"])
+        if "z_up" in cfg:
+            self.viewer_3d.set_z_up(cfg["z_up"])
+        if "ground_rotation" in cfg:
+            self.viewer_3d.set_ground_rotation(cfg["ground_rotation"])
         if "show_grid" in cfg:
             self.viewer_3d.set_show_grid(cfg["show_grid"])
         if "grid_spacing" in cfg:
@@ -1072,22 +1358,80 @@ class MainWindow(QMainWindow):
         if "marker_size" in cfg:
             self.viewer_3d.set_marker_size(cfg["marker_size"])
         if "marker_color" in cfg:
-            self.viewer_3d.marker_color = cfg["marker_color"]
-            self.viewer_3d.set_frame(self.playback.current_frame)
+            self._marker_color_name = cfg.get("marker_color_name", "")
+            self.viewer_3d.set_marker_color(cfg["marker_color"])
+            c_rgba = cfg["marker_color"]
+            qcol = QColor.fromRgbF(c_rgba[0], c_rgba[1], c_rgba[2], 1.0)
+            self.side_panel.set_default_marker_color(qcol)
         if "grf_vector_scale" in cfg:
             self.viewer_3d.set_grf_vector_scale(cfg["grf_vector_scale"])
         if "grf_threshold_n" in cfg:
             self.viewer_3d.grf_threshold_n = cfg["grf_threshold_n"]
+        if "grf_color" in cfg:
+            self._grf_color_name = cfg.get("grf_color_name", "")
+            self.viewer_3d.set_grf_color(cfg["grf_color"])
         if "loop" in cfg:
             self.playback.set_loop(cfg["loop"])
             self.btn_loop.setChecked(cfg["loop"])
             self.btn_loop.setText("Loop: ON" if cfg["loop"] else "Loop: OFF")
+        if "default_speed" in cfg:
+            self._default_speed = cfg["default_speed"]
+            spd_clean = cfg["default_speed"].replace(" (Real-time)", "")
+            idx = self.combo_speed.findText(spd_clean)
+            if idx >= 0:
+                self.combo_speed.setCurrentIndex(idx)
         if "plot_antialias" in cfg:
             aa = cfg["plot_antialias"]
+            if 'pg' in globals() and hasattr(pg, 'setConfigOptions'):
+                try:
+                    pg.setConfigOptions(antialias=aa)
+                except Exception:
+                    pass
             if hasattr(self, 'plot_panel'):
                 self.plot_panel.set_antialias(aa)
             if self.plotter_window:
                 self.plotter_window.set_antialias(aa)
+
+        if save_to_disk:
+            self._save_settings(cfg)
+
+    def _save_settings(self, cfg: Optional[dict] = None):
+        """Save settings to QSettings so they persist across application restarts."""
+        try:
+            import json
+            raw = self.settings.value("user_settings_json", None)
+            data = json.loads(raw) if raw and isinstance(raw, str) else {}
+
+            if cfg is not None:
+                for k, v in cfg.items():
+                    if isinstance(v, (tuple, list)):
+                        data[k] = list(v)
+                    elif isinstance(v, (str, int, float, bool)) or v is None:
+                        data[k] = v
+            else:
+                current = self._collect_current_app_settings()
+                for k, v in current.items():
+                    if isinstance(v, (tuple, list)):
+                        data[k] = list(v)
+                    elif isinstance(v, (str, int, float, bool)) or v is None:
+                        data[k] = v
+
+            self.settings.setValue("user_settings_json", json.dumps(data))
+            self.settings.sync()
+        except Exception as e:
+            print(f"Warning: Failed to persist user settings: {e}")
+
+    def _load_saved_settings(self):
+        """Load user settings from QSettings on startup and set them as active defaults."""
+        try:
+            import json
+            raw = self.settings.value("user_settings_json", None)
+            if raw and isinstance(raw, str):
+                saved_cfg = json.loads(raw)
+                if isinstance(saved_cfg, dict) and saved_cfg:
+                    self._apply_settings(saved_cfg, save_to_disk=False)
+        except Exception as e:
+            print(f"Warning: Failed to load saved user settings: {e}")
 
     def show_about_dialog(self):
         dlg = AboutDialog(self)

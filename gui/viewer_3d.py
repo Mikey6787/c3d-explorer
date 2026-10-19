@@ -4,7 +4,7 @@ from typing import Dict, List, Optional
 import numpy as np
 from OpenGL import GL
 from PySide6.QtCore import Qt, QPoint, QRectF, Signal
-from PySide6.QtGui import QVector3D, QVector4D, QColor, QFont
+from PySide6.QtGui import QVector3D, QVector4D, QColor, QFont, QMatrix4x4, QImage, QPainter
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QToolButton,
     QLabel, QFrame, QSizePolicy
@@ -22,18 +22,31 @@ class InteractiveGLViewWidget(gl.GLViewWidget):
         self._press_pos: Optional[QPoint] = None
 
     def mousePressEvent(self, ev):
-        if ev.button() == Qt.LeftButton:
+        if ev.button() in (Qt.LeftButton, Qt.RightButton):
             self._press_pos = ev.pos()
         super().mousePressEvent(ev)
 
     def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.LeftButton and self._press_pos is not None:
+        if self._press_pos is not None:
             dist = (ev.pos() - self._press_pos).manhattanLength()
             self._press_pos = None
             if dist < 6:
-                # Clicked on viewport without camera drag -> pick marker in 3D
-                self.viewer.handle_3d_click(ev.pos().x(), ev.pos().y(), ev.modifiers())
+                if ev.button() == Qt.LeftButton:
+                    self.viewer.handle_3d_click(ev.pos().x(), ev.pos().y(), ev.modifiers())
+                elif ev.button() == Qt.RightButton:
+                    gpos = ev.globalPosition().toPoint() if hasattr(ev, 'globalPosition') else ev.globalPos()
+                    self.viewer.handle_3d_right_click(ev.pos().x(), ev.pos().y(), gpos)
         super().mouseReleaseEvent(ev)
+
+    def contextMenuEvent(self, ev):
+        pos = ev.pos()
+        gpos = ev.globalPos()
+        marker = self.viewer.pick_marker_at(pos.x(), pos.y())
+        if marker:
+            self.viewer.handle_3d_right_click(pos.x(), pos.y(), gpos)
+            ev.accept()
+        else:
+            super().contextMenuEvent(ev)
 
     def wheelEvent(self, ev):
         super().wheelEvent(ev)
@@ -87,6 +100,73 @@ def make_cone_mesh(tip, direction, length=35.0, radius=10.0, color=(1, 0, 0, 1),
     return mesh
 
 
+def get_cylinder_geometry(p1, p2, radius=4.0, n_segments=12):
+    """Compute vertices and faces for a clean 3D solid cylinder between p1 and p2."""
+    p1 = np.array(p1, dtype=np.float32)
+    p2 = np.array(p2, dtype=np.float32)
+    d = p2 - p1
+    length = float(np.linalg.norm(d))
+    if length < 1e-6:
+        return np.zeros((1, 3), dtype=np.float32), np.zeros((0, 3), dtype=np.int32)
+    d = d / length
+
+    if abs(d[0]) < 0.8:
+        v1 = np.cross(d, [1, 0, 0])
+    else:
+        v1 = np.cross(d, [0, 1, 0])
+    v1 = v1 / np.linalg.norm(v1)
+    v2 = np.cross(d, v1)
+
+    angles = np.linspace(0, 2 * np.pi, n_segments, endpoint=False)
+    verts = [p1, p2]
+    for a in angles:
+        offset = radius * (np.cos(a) * v1 + np.sin(a) * v2)
+        verts.append(p1 + offset)
+    for a in angles:
+        offset = radius * (np.cos(a) * v1 + np.sin(a) * v2)
+        verts.append(p2 + offset)
+    verts = np.array(verts, dtype=np.float32)
+
+    faces = []
+    for i in range(n_segments):
+        b1 = 2 + i
+        b2 = 2 + ((i + 1) % n_segments)
+        t1 = 2 + n_segments + i
+        t2 = 2 + n_segments + ((i + 1) % n_segments)
+        faces.append([b1, b2, t2])
+        faces.append([b1, t2, t1])
+        faces.append([0, b2, b1])
+        faces.append([1, t1, t2])
+    faces = np.array(faces, dtype=np.int32)
+    return verts, faces
+
+
+def make_cylinder_mesh(p1, p2, radius=4.0, color=(1, 0, 0, 1), n_segments=12):
+    """Generate a 3D cylinder mesh with opaque solid rendering."""
+    verts, faces = get_cylinder_geometry(p1, p2, radius, n_segments)
+    if len(faces) == 0:
+        return None
+    mesh = gl.GLMeshItem(vertexes=verts, faces=faces, color=color, smooth=True, drawEdges=False)
+    mesh.setGLOptions('opaque')
+    mesh.setDepthValue(5)
+    return mesh
+
+
+class GLPlateMeshItem(gl.GLMeshItem):
+    """
+    Custom GLMeshItem for transparent force plate surfaces.
+    Disables depth buffer writes during rendering so underlying grid lines,
+    local coordinate axes (especially the vertical Z axis), and opposing features
+    remain fully visible through the transparent surface regardless of camera angle.
+    """
+    def paint(self):
+        GL.glDepthMask(GL.GL_FALSE)
+        try:
+            super().paint()
+        finally:
+            GL.glDepthMask(GL.GL_TRUE)
+
+
 class Viewer3D(QWidget):
     """
     3D biomechanics OpenGL viewport displaying:
@@ -99,6 +179,7 @@ class Viewer3D(QWidget):
     """
 
     markersSelected = Signal(list)  # Emits List[str] of selected marker names
+    markerContextMenuRequested = Signal(object, list)  # Emits (QPoint global_pos, List[str] marker_names)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -118,7 +199,12 @@ class Viewer3D(QWidget):
         self.grid_spacing: float = 500.0
         self.grf_vector_scale: float = 0.8  # mm per Newton
         self.grf_threshold_n: float = 15.0  # Min vertical force to display vector
+        self.grf_color: tuple = (1.0, 0.35, 0.08, 1.0)  # Bright amber-orange default
+        self.is_dark: bool = True
         self.z_up: bool = True  # True: standard Z-up, False: Y-up
+        self.ground_rotation: float = 0.0  # 0, 90, 180, 270 degrees
+        self.orientation_matrix: np.ndarray = np.eye(3, dtype=np.float32)
+        self._compute_orientation_matrix()
 
         # Item handles
         self.grid_item: Optional[gl.GLGridItem] = None
@@ -126,7 +212,9 @@ class Viewer3D(QWidget):
         self.marker_scatter: Optional[gl.GLScatterPlotItem] = None
         self.plate_mesh_items: List[gl.GLMeshItem] = []
         self.plate_axis_items: List[gl.GLGraphicsItem] = []
+        self.plate_label_items: List[gl.GLGraphicsItem] = []
         self.grf_vector_items: List[gl.GLLinePlotItem] = []
+        self.grf_shaft_items: List[gl.GLMeshItem] = []
         self.grf_cone_items: List[gl.GLMeshItem] = []
 
         # Measurement handles & individual marker styling
@@ -193,11 +281,13 @@ class Viewer3D(QWidget):
 
         # 4. Measurement Overlay Items (lines and text labels)
         self.meas_line1 = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(1.0, 0.85, 0.0, 1.0), width=2.0)
+        self.meas_line1.setGLOptions('opaque')
         self.meas_line1.setDepthValue(50)
         self.meas_line1.setVisible(False)
         self.gl_view.addItem(self.meas_line1)
 
         self.meas_line2 = gl.GLLinePlotItem(pos=np.zeros((2, 3)), color=(1.0, 0.85, 0.0, 1.0), width=2.0)
+        self.meas_line2.setGLOptions('opaque')
         self.meas_line2.setDepthValue(50)
         self.meas_line2.setVisible(False)
         self.gl_view.addItem(self.meas_line2)
@@ -211,6 +301,38 @@ class Viewer3D(QWidget):
         self.gl_view.opts['center'] = QVector3D(0, 0, 0)
         self.gl_view.opts['distance'] = 3200.0
         self.set_camera_isometric()
+
+    def _compute_orientation_matrix(self):
+        """Compute 3x3 orientation matrix based on z_up and ground_rotation."""
+        if self.z_up:
+            R_base = np.eye(3, dtype=np.float32)
+        else:
+            # Map Y -> Z (Up), Z -> -Y, X -> X (proper rotation around X by -90 deg)
+            R_base = np.array([
+                [1.0,  0.0,  0.0],
+                [0.0,  0.0, -1.0],
+                [0.0,  1.0,  0.0]
+            ], dtype=np.float32)
+
+        rad = np.radians(self.ground_rotation)
+        c, s = float(np.cos(rad)), float(np.sin(rad))
+        R_yaw = np.array([
+            [c, -s, 0.0],
+            [s,  c, 0.0],
+            [0.0, 0.0, 1.0]
+        ], dtype=np.float32)
+
+        self.orientation_matrix = (R_yaw @ R_base).astype(np.float32)
+
+    def transform_point(self, pt) -> np.ndarray:
+        """Transform a 3D coordinate vector [x, y, z] by current orientation."""
+        arr = np.asarray(pt, dtype=np.float32)
+        return self.orientation_matrix @ arr
+
+    def transform_points(self, pts: np.ndarray) -> np.ndarray:
+        """Transform an (N, 3) coordinate array by current orientation."""
+        arr = np.asarray(pts, dtype=np.float32)
+        return arr @ self.orientation_matrix.T
 
     def _build_global_axes(self):
         """Construct sleek, professional global coordinate triad with clean arrowheads."""
@@ -229,21 +351,31 @@ class Viewer3D(QWidget):
 
         font = QFont("Arial", 11, QFont.Bold)
 
-        # Shaft stops at the base of the cone so line does not overlap or swallow the cone!
-        shaft_x = axis_length - cone_len
-        lx = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [shaft_x, 0, 0]], dtype=np.float32), color=c_x, width=line_w)
-        cone_x = make_cone_mesh([axis_length, 0, 0], [1, 0, 0], length=cone_len, radius=cone_radius, color=c_x)
-        txt_x = gl.GLTextItem(pos=[axis_length + 18, 0, 0], text="X", color=c_x, font=font)
+        u_x = self.transform_point(np.array([1, 0, 0], dtype=np.float32))
+        u_y = self.transform_point(np.array([0, 1, 0], dtype=np.float32))
+        u_z = self.transform_point(np.array([0, 0, 1], dtype=np.float32))
 
-        shaft_y = axis_length - cone_len
-        ly = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [0, shaft_y, 0]], dtype=np.float32), color=c_y, width=line_w)
-        cone_y = make_cone_mesh([0, axis_length, 0], [0, 1, 0], length=cone_len, radius=cone_radius, color=c_y)
-        txt_y = gl.GLTextItem(pos=[0, axis_length + 18, 0], text="Y", color=c_y, font=font)
+        # Shaft stops at the base of the cone so shaft does not overlap or swallow the cone!
+        ax_radius = max(2.5, line_w * 1.5)
+        zero_pt = np.zeros(3, dtype=np.float32)
 
-        shaft_z = axis_length - cone_len
-        lz = gl.GLLinePlotItem(pos=np.array([[0, 0, 0], [0, 0, shaft_z]], dtype=np.float32), color=c_z, width=line_w)
-        cone_z = make_cone_mesh([0, 0, axis_length], [0, 0, 1], length=cone_len, radius=cone_radius, color=c_z)
-        txt_z = gl.GLTextItem(pos=[0, 0, axis_length + 18], text="Z", color=c_z, font=font)
+        shaft_x = u_x * (axis_length - cone_len)
+        tip_x = u_x * axis_length
+        lx = make_cylinder_mesh(zero_pt, shaft_x, radius=ax_radius, color=c_x)
+        cone_x = make_cone_mesh(tip_x, u_x, length=cone_len, radius=cone_radius, color=c_x)
+        txt_x = gl.GLTextItem(pos=u_x * (axis_length + 18), text="X", color=QColor(245, 55, 55, 255), font=font)
+
+        shaft_y = u_y * (axis_length - cone_len)
+        tip_y = u_y * axis_length
+        ly = make_cylinder_mesh(zero_pt, shaft_y, radius=ax_radius, color=c_y)
+        cone_y = make_cone_mesh(tip_y, u_y, length=cone_len, radius=cone_radius, color=c_y)
+        txt_y = gl.GLTextItem(pos=u_y * (axis_length + 18), text="Y", color=QColor(55, 220, 75, 255), font=font)
+
+        shaft_z = u_z * (axis_length - cone_len)
+        tip_z = u_z * axis_length
+        lz = make_cylinder_mesh(zero_pt, shaft_z, radius=ax_radius, color=c_z)
+        cone_z = make_cone_mesh(tip_z, u_z, length=cone_len, radius=cone_radius, color=c_z)
+        txt_z = gl.GLTextItem(pos=u_z * (axis_length + 18), text="Z", color=QColor(65, 155, 250, 255), font=font)
 
         items = [lx, cone_x, txt_x, ly, cone_y, txt_y, lz, cone_z, txt_z]
         for it in items:
@@ -339,10 +471,11 @@ class Viewer3D(QWidget):
             if len(data) > 0:
                 cur = data[self.current_frame]
                 if not (np.all(cur == 0) or np.any(np.isnan(cur))):
-                    all_points.append(cur)
+                    all_points.append(self.transform_point(cur))
 
         for fp in self.trial.force_platforms:
-            all_points.extend(fp.corners.T)
+            for pt in fp.corners.T:
+                all_points.append(self.transform_point(pt))
 
         if not all_points:
             self.gl_view.opts['center'] = QVector3D(0, 0, 0)
@@ -419,9 +552,18 @@ class Viewer3D(QWidget):
             self.gl_view.removeItem(item)
         self.plate_axis_items.clear()
 
+        for item in self.plate_label_items:
+            self.gl_view.removeItem(item)
+        self.plate_label_items.clear()
+
         for item in self.grf_vector_items:
             self.gl_view.removeItem(item)
         self.grf_vector_items.clear()
+
+        for item in getattr(self, "grf_shaft_items", []):
+            self.gl_view.removeItem(item)
+        if hasattr(self, "grf_shaft_items"):
+            self.grf_shaft_items.clear()
 
         for item in self.grf_cone_items:
             self.gl_view.removeItem(item)
@@ -430,33 +572,58 @@ class Viewer3D(QWidget):
         if not self.trial:
             return
 
-        plate_font = QFont("Arial", 11, QFont.Bold)
-        axis_font = QFont("Arial", 10, QFont.Bold)
-
         for fp in self.trial.force_platforms:
             c = fp.corners  # Shape (3, 4)
-            p0, p1, p2, p3 = c[:, 0], c[:, 1], c[:, 2], c[:, 3]
+            p0 = self.transform_point(c[:, 0])
+            p1 = self.transform_point(c[:, 1])
+            p2 = self.transform_point(c[:, 2])
+            p3 = self.transform_point(c[:, 3])
 
-            # 1. Plate Surface Mesh (translucent dark plate, slightly offset in Z to prevent z-fighting with foot markers)
+            # 1. Plate Surface Mesh (translucent plate, slightly offset in Z to prevent z-fighting with foot markers)
+            is_dark = getattr(self, "is_dark", True)
+            if is_dark:
+                plate_color = (0.14, 0.18, 0.26, 0.35)
+                edge_color = (0.0, 0.85, 0.95, 1.0)
+                label_color = QColor(0, 235, 255, 255)
+            else:
+                # In light theme, delicate translucent tint ensures the floor grid and vertical axis are clearly visible through the plate
+                plate_color = (0.12, 0.20, 0.35, 0.16)
+                edge_color = (0.02, 0.55, 0.82, 0.95)
+                label_color = QColor(2, 132, 199, 255)
+
             verts = np.array([p0, p1, p2, p3], dtype=np.float32)
             verts[:, 2] -= 2.0  # 2mm downward offset so markers resting on the surface are physically above
             faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
-            mesh = gl.GLMeshItem(
+            mesh = GLPlateMeshItem(
                 vertexes=verts,
                 faces=faces,
-                color=(0.14, 0.18, 0.26, 0.65),
-                drawEdges=True,
-                edgeColor=(0.0, 0.85, 0.95, 1.0),
+                color=plate_color,
+                drawEdges=False,
                 smooth=False
             )
             mesh.setGLOptions('translucent')
-            mesh.setDepthValue(-5)  # Rendered before markers
+            mesh.setDepthValue(150)  # Rendered after opaque axes and markers so both sides and vertical axis remain visible
             mesh.setVisible(self.show_force_plates)
             self.gl_view.addItem(mesh)
             self.plate_mesh_items.append(mesh)
 
+            # Clean rectangular border perimeter (no internal diagonal split line)
+            border_pts = np.array([p0, p1, p2, p3, p0], dtype=np.float32)
+            border_pts[:, 2] -= 1.8
+            border_line = gl.GLLinePlotItem(
+                pos=border_pts,
+                color=edge_color,
+                width=2.0,
+                mode='line_strip'
+            )
+            border_line.setGLOptions('opaque')
+            border_line.setDepthValue(155)
+            border_line.setVisible(self.show_force_plates)
+            self.gl_view.addItem(border_line)
+            self.plate_mesh_items.append(border_line)
+
             # 2. Plate Local Coordinate System Axes
-            c_center = fp.center
+            c_center = self.transform_point(fp.center)
             # Compute local unit vectors
             ux = p1 - p0
             ux_len = np.linalg.norm(ux)
@@ -471,56 +638,134 @@ class Viewer3D(QWidget):
             uz = uz / uz_len if uz_len > 1e-4 else np.array([0, 0, 1], dtype=np.float32)
 
             axis_len = 130.0  # 130 mm sleek length
-            p_cone_len = 22.0
-            p_cone_rad = 7.0
-            p_width = 1.8     # Thin, high-precision line width (never messy on zoom-out)
+            p_cone_len = 24.0
+            p_cone_rad = 7.5
+            p_radius = 2.5     # Solid, visible cylinder radius
 
-            col_px = (0.95, 0.25, 0.25, 1.0)  # Red
-            col_py = (0.25, 0.85, 0.30, 1.0)  # Green
-            col_pz = (0.30, 0.65, 0.98, 1.0)  # Blue
+            col_px = (0.95, 0.20, 0.20, 1.0)  # Red
+            col_py = (0.15, 0.78, 0.25, 1.0)  # Green
+            col_pz = (0.08, 0.52, 0.95, 1.0)  # Rich vibrant Blue
 
-            # Local X Axis (line stops cleanly at cone base)
+            # Local X Axis (solid cylinder and cone)
             shaft_px = c_center + ux * (axis_len - p_cone_len)
             tip_px = c_center + ux * axis_len
-            lx = gl.GLLinePlotItem(pos=np.array([c_center, shaft_px], dtype=np.float32), color=col_px, width=p_width)
+            lx = make_cylinder_mesh(c_center, shaft_px, radius=p_radius, color=col_px)
             cx = make_cone_mesh(tip_px, ux, length=p_cone_len, radius=p_cone_rad, color=col_px)
-            tx = gl.GLTextItem(pos=c_center + ux * (axis_len + 14), text="X", color=col_px, font=axis_font)
 
-            # Local Y Axis (line stops cleanly at cone base)
+            # Local Y Axis (solid cylinder and cone)
             shaft_py = c_center + uy * (axis_len - p_cone_len)
             tip_py = c_center + uy * axis_len
-            ly = gl.GLLinePlotItem(pos=np.array([c_center, shaft_py], dtype=np.float32), color=col_py, width=p_width)
+            ly = make_cylinder_mesh(c_center, shaft_py, radius=p_radius, color=col_py)
             cy = make_cone_mesh(tip_py, uy, length=p_cone_len, radius=p_cone_rad, color=col_py)
-            ty = gl.GLTextItem(pos=c_center + uy * (axis_len + 14), text="Y", color=col_py, font=axis_font)
 
-            # Local Z Axis (line stops cleanly at cone base)
+            # Local Z Axis (solid cylinder and cone)
             shaft_pz = c_center + uz * (axis_len - p_cone_len)
             tip_pz = c_center + uz * axis_len
-            lz = gl.GLLinePlotItem(pos=np.array([c_center, shaft_pz], dtype=np.float32), color=col_pz, width=p_width)
+            lz = make_cylinder_mesh(c_center, shaft_pz, radius=p_radius, color=col_pz)
             cz = make_cone_mesh(tip_pz, uz, length=p_cone_len, radius=p_cone_rad, color=col_pz)
-            tz = gl.GLTextItem(pos=c_center + uz * (axis_len + 14), text="Z", color=col_pz, font=axis_font)
 
-            # Plate ID Label at center
-            lbl_fp = gl.GLTextItem(pos=c_center + np.array([0, 0, 12]), text=f"FP {fp.id}", color=(0.0, 0.9, 1.0, 1.0), font=plate_font)
+            # Plate Number / ID Annotation lying down flat on the force plate surface
+            label_text = f"FP {fp.id}"
+            w, h = 512, 256
+            qimg = QImage(w, h, QImage.Format.Format_RGBA8888)
+            qimg.fill(0)
+            p = QPainter(qimg)
+            p.setRenderHint(QPainter.Antialiasing)
+            p.setRenderHint(QPainter.TextAntialiasing)
+            p.setPen(label_color)
+            p.setFont(QFont("Arial", 120, QFont.Bold))
+            p.drawText(qimg.rect(), Qt.AlignCenter, label_text)
+            p.end()
 
-            for item in (lx, cx, tx, ly, cy, ty, lz, cz, tz, lbl_fp):
+            # Pure numpy vertical flip + memory copy for independent texture
+            arr = np.frombuffer(qimg.bits(), dtype=np.uint8).reshape((h, w, 4))
+            arr_flipped = arr[::-1, :, :].copy()
+            img_data = np.transpose(arr_flipped, (1, 0, 2))
+
+            # Plate edges and surface normal
+            e01 = p1 - p0
+            e01_norm = np.linalg.norm(e01)
+            e01_unit = e01 / e01_norm if e01_norm > 1e-4 else np.array([1, 0, 0], dtype=np.float32)
+
+            e03 = p3 - p0
+            e03_norm = np.linalg.norm(e03)
+            e03_unit = e03 / e03_norm if e03_norm > 1e-4 else np.array([0, 1, 0], dtype=np.float32)
+
+            n = np.cross(e01_unit, e03_unit)
+            n_norm = np.linalg.norm(n)
+            n_unit = n / n_norm if n_norm > 1e-4 else np.array([0, 0, 1], dtype=np.float32)
+            if n_unit[2] < 0:  # In viewer coordinates, +Z is always up
+                n_unit = -n_unit
+
+            # Align text reading direction along the plate edge closest to global X
+            global_x = np.array([1, 0, 0], dtype=np.float32)
+            cand1 = e01_unit if np.dot(e01_unit, global_x) >= 0 else -e01_unit
+            cand3 = e03_unit if np.dot(e03_unit, global_x) >= 0 else -e03_unit
+            tx = cand1 if abs(np.dot(cand1, global_x)) >= abs(np.dot(cand3, global_x)) else cand3
+
+            ty = np.cross(n_unit, tx)
+            ty_norm = np.linalg.norm(ty)
+            ty = ty / ty_norm if ty_norm > 1e-4 else np.array([0, 1, 0], dtype=np.float32)
+
+            # Physical size on plate: width 130mm, height 65mm
+            phys_w, phys_h = 130.0, 65.0
+            sx = phys_w / w
+            sy = phys_h / h
+
+            target_pos = p0 + (c_center - p0) * 0.35
+            pos = target_pos - tx * (phys_w * 0.5) - ty * (phys_h * 0.5) + n_unit * 0.8
+
+            m = QMatrix4x4(
+                float(sx * tx[0]), float(sy * ty[0]), float(n_unit[0]), float(pos[0]),
+                float(sx * tx[1]), float(sy * ty[1]), float(n_unit[1]), float(pos[1]),
+                float(sx * tx[2]), float(sy * ty[2]), float(n_unit[2]), float(pos[2]),
+                0.0,               0.0,               0.0,              1.0
+            )
+
+            lbl_fp = gl.GLImageItem(img_data, glOptions='translucent')
+            lbl_fp.setTransform(m)
+            lbl_fp.setDepthValue(160)
+            lbl_fp.setVisible(self.show_force_plates)
+            # Retain text and color properties for API compatibility and tests
+            lbl_fp.text = label_text
+            lbl_fp.color = label_color
+
+            self.gl_view.addItem(lbl_fp)
+            self.plate_label_items.append(lbl_fp)
+
+            for item in (lx, cx, ly, cy, lz, cz):
                 if item is not None:
                     item.setDepthValue(5)
                     item.setVisible(self.show_plate_axes)
                     self.gl_view.addItem(item)
                     self.plate_axis_items.append(item)
 
-            # 3. Dynamic Ground Reaction Force Vector Line & Conical Arrowhead
-            grf_color = (1.0, 0.35, 0.08, 1.0)  # Bright amber-orange
+            # 3. Dynamic Ground Reaction Force Vector (3D Solid Cylinder Shaft, Cone Arrowhead, and Center Line)
+            grf_color = self.grf_color
             grf_line = gl.GLLinePlotItem(
                 pos=np.zeros((2, 3), dtype=np.float32),
                 color=grf_color,
                 width=2.0
             )
+            grf_line.setGLOptions('opaque')
             grf_line.setDepthValue(20)
             grf_line.setVisible(False)
             self.gl_view.addItem(grf_line)
             self.grf_vector_items.append(grf_line)
+
+            # Solid 3D Cylinder Shaft mesh
+            grf_shaft = gl.GLMeshItem(
+                vertexes=np.zeros((3, 3), dtype=np.float32),
+                faces=np.zeros((1, 3), dtype=np.int32),
+                color=grf_color,
+                smooth=True,
+                drawEdges=False
+            )
+            grf_shaft.setGLOptions('opaque')
+            grf_shaft.setDepthValue(22)
+            grf_shaft.setVisible(False)
+            self.gl_view.addItem(grf_shaft)
+            self.grf_shaft_items.append(grf_shaft)
 
             # Dynamic cone mesh for arrowhead
             grf_cone = gl.GLMeshItem(
@@ -574,8 +819,10 @@ class Viewer3D(QWidget):
                         sizes.append(eff_marker_size)
 
             if positions:
+                pts = np.array(positions, dtype=np.float32)
+                pts = self.transform_points(pts)
                 self.marker_scatter.setData(
-                    pos=np.array(positions, dtype=np.float32),
+                    pos=pts,
                     color=np.array(colors, dtype=np.float32),
                     size=np.array(sizes, dtype=np.float32),
                     pxMode=True
@@ -595,6 +842,7 @@ class Viewer3D(QWidget):
                 if i >= len(self.grf_vector_items):
                     break
                 line_item = self.grf_vector_items[i]
+                shaft_item = self.grf_shaft_items[i] if hasattr(self, "grf_shaft_items") and i < len(self.grf_shaft_items) else None
                 cone_item = self.grf_cone_items[i] if i < len(self.grf_cone_items) else None
 
                 sub = max(1, self.trial.analog_subsamples)
@@ -607,38 +855,53 @@ class Viewer3D(QWidget):
                     f_vec = np.mean(fp.forces[analog_idx:end_idx], axis=0)
                     cop_pt = np.mean(fp.cop[analog_idx:end_idx], axis=0)
 
-                    f_mag = float(np.linalg.norm(f_vec))
-                    if abs(f_vec[2]) >= self.grf_threshold_n and f_mag > 1e-3 and not np.any(np.isnan(cop_pt)):
-                        f_dir = f_vec / f_mag
+                    cop_v = self.transform_point(cop_pt)
+                    f_vec_v = self.transform_point(f_vec)
+                    f_mag = float(np.linalg.norm(f_vec_v))
+                    if abs(f_vec_v[2]) >= self.grf_threshold_n and f_mag > 1e-3 and not np.any(np.isnan(cop_v)):
+                        f_dir = f_vec_v / f_mag
                         scaled_len = f_mag * self.grf_vector_scale
-                        end_pt = cop_pt + f_dir * scaled_len
+                        end_pt = cop_v + f_dir * scaled_len
 
                         # Arrowhead sizing proportional to vector length
                         cone_len = float(min(32.0, max(10.0, scaled_len * 0.22)))
                         cone_rad = float(cone_len * 0.35)
+                        shaft_rad = float(max(2.8, min(7.0, cone_rad * 0.42)))
 
                         # Shaft stops cleanly at base of cone so cone is never swallowed!
-                        shaft_end = end_pt - f_dir * cone_len if scaled_len > cone_len else cop_pt
+                        shaft_end = end_pt - f_dir * cone_len if scaled_len > cone_len else cop_v
 
                         line_item.setData(
-                            pos=np.array([cop_pt, shaft_end], dtype=np.float32)
+                            pos=np.array([cop_v, shaft_end], dtype=np.float32),
+                            color=self.grf_color
                         )
                         line_item.setVisible(True)
 
+                        if shaft_item:
+                            s_verts, s_faces = get_cylinder_geometry(cop_v, shaft_end, radius=shaft_rad, n_segments=12)
+                            shaft_item.setMeshData(vertexes=s_verts, faces=s_faces, color=self.grf_color)
+                            shaft_item.setVisible(True)
+
                         if cone_item:
                             verts, faces = get_cone_geometry(end_pt, f_dir, length=cone_len, radius=cone_rad, n_segments=14)
-                            cone_item.setMeshData(vertexes=verts, faces=faces)
+                            cone_item.setMeshData(vertexes=verts, faces=faces, color=self.grf_color)
                             cone_item.setVisible(True)
                     else:
                         line_item.setVisible(False)
+                        if shaft_item:
+                            shaft_item.setVisible(False)
                         if cone_item:
                             cone_item.setVisible(False)
                 else:
                     line_item.setVisible(False)
+                    if shaft_item:
+                        shaft_item.setVisible(False)
                     if cone_item:
                         cone_item.setVisible(False)
         else:
             for item in self.grf_vector_items:
+                item.setVisible(False)
+            for item in getattr(self, "grf_shaft_items", []):
                 item.setVisible(False)
             for item in self.grf_cone_items:
                 item.setVisible(False)
@@ -657,10 +920,12 @@ class Viewer3D(QWidget):
                         valid = not (np.all(p1 == 0) or np.all(p2 == 0) or np.isnan(p1).any() or np.isnan(p2).any())
                         if valid:
                             dist = np.linalg.norm(p1 - p2)
-                            self.meas_line1.setData(pos=np.array([p1, p2], dtype=np.float32))
+                            p1_v = self.transform_point(p1)
+                            p2_v = self.transform_point(p2)
+                            self.meas_line1.setData(pos=np.array([p1_v, p2_v], dtype=np.float32))
                             self.meas_line1.setVisible(True)
                             self.meas_line2.setVisible(False)
-                            mid = (p1 + p2) / 2.0 + np.array([0, 0, 15.0], dtype=np.float32)
+                            mid = (p1_v + p2_v) / 2.0 + np.array([0, 0, 15.0], dtype=np.float32)
                             self.meas_label.setData(pos=mid, text=f"{dist:.1f} mm")
                             self.meas_label.setVisible(True)
                         else:
@@ -678,8 +943,11 @@ class Viewer3D(QWidget):
                         valid = not (np.all(pa == 0) or np.all(pb == 0) or np.all(pc == 0) or
                                      np.isnan(pa).any() or np.isnan(pb).any() or np.isnan(pc).any())
                         if valid:
-                            self.meas_line1.setData(pos=np.array([pa, pb], dtype=np.float32))
-                            self.meas_line2.setData(pos=np.array([pb, pc], dtype=np.float32))
+                            pa_v = self.transform_point(pa)
+                            pb_v = self.transform_point(pb)
+                            pc_v = self.transform_point(pc)
+                            self.meas_line1.setData(pos=np.array([pa_v, pb_v], dtype=np.float32))
+                            self.meas_line2.setData(pos=np.array([pb_v, pc_v], dtype=np.float32))
                             self.meas_line1.setVisible(True)
                             self.meas_line2.setVisible(True)
                             v1 = pa - pb
@@ -688,7 +956,7 @@ class Viewer3D(QWidget):
                             if n1 > 1e-4 and n2 > 1e-4:
                                 cos_val = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
                                 deg = np.degrees(np.arccos(cos_val))
-                                self.meas_label.setData(pos=pb + np.array([0, 0, 20.0], dtype=np.float32), text=f"{deg:.1f}°")
+                                self.meas_label.setData(pos=pb_v + np.array([0, 0, 20.0], dtype=np.float32), text=f"{deg:.1f}°")
                                 self.meas_label.setVisible(True)
                         else:
                             self.meas_line1.setVisible(False)
@@ -713,6 +981,8 @@ class Viewer3D(QWidget):
         self.show_force_plates = show
         for item in self.plate_mesh_items:
             item.setVisible(show)
+        for item in self.plate_label_items:
+            item.setVisible(show)
 
     def set_show_plate_axes(self, show: bool):
         self.show_plate_axes = show
@@ -733,6 +1003,8 @@ class Viewer3D(QWidget):
         self.show_grf_vectors = show
         if not show:
             for item in self.grf_vector_items:
+                item.setVisible(False)
+            for item in getattr(self, "grf_shaft_items", []):
                 item.setVisible(False)
             for item in self.grf_cone_items:
                 item.setVisible(False)
@@ -766,8 +1038,9 @@ class Viewer3D(QWidget):
                     if name in self.selected_marker_labels:
                         self.selected_marker_labels[name].setVisible(False)
                     continue
+                pos_v = self.transform_point(pos)
                 offset = np.array([0.0, 0.0, 18.0], dtype=np.float32)
-                lbl_pos = pos + offset
+                lbl_pos = pos_v + offset
                 if name not in self.selected_marker_labels:
                     txt_item = gl.GLTextItem(
                         pos=lbl_pos,
@@ -782,15 +1055,15 @@ class Viewer3D(QWidget):
                     self.selected_marker_labels[name].setData(pos=lbl_pos, text=name)
                     self.selected_marker_labels[name].setVisible(True)
 
-    def handle_3d_click(self, mouse_x: int, mouse_y: int, modifiers):
-        """Interactive 3D raycast/projection marker picking."""
+    def pick_marker_at(self, mouse_x: int, mouse_y: int) -> Optional[str]:
+        """Find the nearest visible 3D marker within screen picking radius."""
         if not self.trial or not self.show_markers:
-            return
+            return None
 
         w = self.gl_view.width()
         h = self.gl_view.height()
         if w <= 0 or h <= 0:
-            return
+            return None
 
         proj = self.gl_view.projectionMatrix((0, 0, w, h), (0, 0, w, h))
         view = self.gl_view.viewMatrix()
@@ -809,7 +1082,8 @@ class Viewer3D(QWidget):
             if np.all(pos3d == 0) or np.any(np.isnan(pos3d)):
                 continue
 
-            pt4 = QVector4D(float(pos3d[0]), float(pos3d[1]), float(pos3d[2]), 1.0)
+            pos_v = self.transform_point(pos3d)
+            pt4 = QVector4D(float(pos_v[0]), float(pos_v[1]), float(pos_v[2]), 1.0)
             clip = mvp.map(pt4)
             if clip.w() <= 0:
                 continue
@@ -826,6 +1100,12 @@ class Viewer3D(QWidget):
             if dist < pick_radius and dist < min_dist_px:
                 min_dist_px = dist
                 best_marker = name
+
+        return best_marker
+
+    def handle_3d_click(self, mouse_x: int, mouse_y: int, modifiers):
+        """Interactive 3D raycast/projection marker picking."""
+        best_marker = self.pick_marker_at(mouse_x, mouse_y)
 
         is_multi = bool(modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier))
 
@@ -844,6 +1124,17 @@ class Viewer3D(QWidget):
         self.selected_marker = self.selected_markers[0] if self.selected_markers else None
         self.set_frame(self.current_frame)
         self.markersSelected.emit(list(self.selected_markers))
+
+    def handle_3d_right_click(self, mouse_x: int, mouse_y: int, global_pos: QPoint):
+        """Handle right-click on 3D marker: select marker and request context menu."""
+        marker = self.pick_marker_at(mouse_x, mouse_y)
+        if marker:
+            if marker not in self.selected_markers:
+                self.selected_markers = [marker]
+                self.selected_marker = marker
+                self.set_frame(self.current_frame)
+                self.markersSelected.emit(list(self.selected_markers))
+            self.markerContextMenuRequested.emit(global_pos, list(self.selected_markers))
 
     def select_markers(self, marker_names: List[str]):
         """Highlight one or multiple markers in 3D."""
@@ -904,6 +1195,31 @@ class Viewer3D(QWidget):
             lbl.setData(text=new_name)
         self.set_frame(self.current_frame)
 
+    def remove_marker(self, name: str):
+        """Remove marker key from custom colors, selection, labels, and hidden sets."""
+        self.custom_marker_colors.pop(name, None)
+        if name in self.selected_markers:
+            self.selected_markers.remove(name)
+        if self.selected_marker == name:
+            self.selected_marker = None
+        self.hidden_markers.discard(name)
+        if name in self.selected_marker_labels:
+            lbl = self.selected_marker_labels.pop(name)
+            try:
+                self.gl_view.removeItem(lbl)
+            except Exception:
+                pass
+        if self.active_measurement:
+            if name in (
+                self.active_measurement.get("m1"),
+                self.active_measurement.get("m2"),
+                self.active_measurement.get("ma"),
+                self.active_measurement.get("mb"),
+                self.active_measurement.get("mc")
+            ):
+                self.active_measurement = None
+        self.set_frame(self.current_frame)
+
     def set_distance_measurement(self, m1: str, m2: str, enabled: bool):
         """Enable or disable interactive 3D distance line between two markers."""
         if enabled and m1 and m2 and m1 != m2:
@@ -961,7 +1277,14 @@ class Viewer3D(QWidget):
 
     def set_viewport_bg(self, color_str: str):
         """Set 3D viewport background color."""
-        self.gl_view.setBackgroundColor(QColor(color_str))
+        qc = QColor(color_str)
+        self.gl_view.setBackgroundColor(qc)
+        lum = (qc.red() * 299 + qc.green() * 587 + qc.blue() * 114) / 1000
+        new_is_dark = lum < 128
+        if getattr(self, "is_dark", True) != new_is_dark:
+            self.is_dark = new_is_dark
+            self._build_global_axes()
+            self._rebuild_force_plates()
 
     def set_show_markers(self, show: bool):
         """Toggle 3D optical markers visibility."""
@@ -975,6 +1298,8 @@ class Viewer3D(QWidget):
         self.show_force_plates = show
         for item in self.plate_mesh_items:
             item.setVisible(show)
+        for item in self.plate_label_items:
+            item.setVisible(show)
 
     def set_show_grf_vectors(self, show: bool):
         """Toggle ground reaction force vectors."""
@@ -982,16 +1307,84 @@ class Viewer3D(QWidget):
         if not show:
             for item in self.grf_vector_items:
                 item.setVisible(False)
+            for item in getattr(self, "grf_shaft_items", []):
+                item.setVisible(False)
             for item in self.grf_cone_items:
                 item.setVisible(False)
         else:
             self.set_frame(self.current_frame)
 
+    def set_marker_color(self, color_rgba: tuple):
+        """Set default optical marker color (R, G, B, A)."""
+        self.marker_color = tuple(color_rgba)
+        self.set_frame(self.current_frame)
+
+    def set_grf_color(self, color_rgba: tuple):
+        """Set ground reaction force (GRF) vector color (R, G, B, A)."""
+        self.grf_color = tuple(color_rgba)
+        for line_item in self.grf_vector_items:
+            try:
+                line_item.setData(color=self.grf_color)
+            except Exception:
+                pass
+        for shaft_item in getattr(self, "grf_shaft_items", []):
+            try:
+                shaft_item.setColor(self.grf_color)
+            except Exception:
+                pass
+        for cone_item in self.grf_cone_items:
+            try:
+                cone_item.setColor(self.grf_color)
+            except Exception:
+                pass
+        self.set_frame(self.current_frame)
+
+    def set_z_up(self, z_up: bool):
+        """Set whether global up axis is Z-Up (True) or Y-Up (False)."""
+        new_val = bool(z_up)
+        if self.z_up != new_val:
+            self.z_up = new_val
+            self._compute_orientation_matrix()
+            self._build_global_axes()
+            self._rebuild_force_plates()
+            self.set_frame(self.current_frame)
+            if self.trial:
+                self.fit_view_to_data()
+
+    def set_ground_rotation(self, rotation_deg: float):
+        """Set ground orientation rotation in degrees (0, 90, 180, 270)."""
+        rot_val = float(rotation_deg)
+        if self.ground_rotation != rot_val:
+            self.ground_rotation = rot_val
+            self._compute_orientation_matrix()
+            self._build_global_axes()
+            self._rebuild_force_plates()
+            self.set_frame(self.current_frame)
+            if self.trial:
+                self.fit_view_to_data()
+
     def apply_theme(self, theme_dict: dict):
-        """Update 3D viewport background and grid color to match theme."""
+        """Update 3D viewport background, grid, and auto-adjust marker and vector visibility for theme."""
         vp_bg = theme_dict.get("viewport_bg", "#151720")
         grid_col = theme_dict.get("grid_color", (80, 90, 110, 80))
         self.gl_view.setBackgroundColor(QColor(vp_bg))
         if self.grid_item:
             self.grid_item.setColor(grid_col)
+
+        is_dark = theme_dict.get("is_dark", True)
+        self.is_dark = is_dark
+        if not is_dark:
+            # Automatically switch marker color to black on light themes
+            self.marker_color = (0.0, 0.0, 0.0, 1.0)
+            # Ensure GRF vector is clearly visible on light themes
+            if getattr(self, "grf_color", None) and np.mean(self.grf_color[:3]) > 0.85:
+                self.grf_color = (1.0, 0.35, 0.08, 1.0)
+        else:
+            # Revert from black to white if returning to a dark theme
+            if getattr(self, "marker_color", None) and self.marker_color[:3] == (0.0, 0.0, 0.0):
+                self.marker_color = (1.0, 1.0, 1.0, 1.0)
+
+        self._build_global_axes()
+        self._rebuild_force_plates()
+        self.set_frame(self.current_frame)
 

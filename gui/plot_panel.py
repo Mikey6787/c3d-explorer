@@ -1,6 +1,6 @@
 """Synchronized 2D plotting panel for analog channels, ground reaction forces, and events."""
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont
@@ -38,12 +38,15 @@ class PlotPanel(QWidget):
     - Synchronized playback time cursor
     - Event indicators (vertical dashed lines)
     """
-    timeCursorMoved = Signal(float)  # Emitted when user drags cursor on plot
+    timeCursorMoved = Signal(float)       # Emitted when user drags cursor on plot
+    trimRangeChanged = Signal(int, int)   # Emitted when user drags ROI bounds on plot
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.trial: Optional[C3DTrial] = None
         self.current_time: float = 0.0
+        self.trim_range: Optional[Tuple[int, int]] = None
+        self.roi_region: Optional[pg.LinearRegionItem] = None
         self.active_curves: Dict[str, pg.PlotDataItem] = {}
         self.event_lines: List[pg.InfiniteLine] = []
         self._color_counter: int = 0
@@ -82,6 +85,11 @@ class PlotPanel(QWidget):
 
         ctrl_bar.addStretch()
 
+        btn_fit_roi = QPushButton("Fit ROI")
+        btn_fit_roi.setToolTip("Auto-fit horizontal zoom to trimmed Region of Interest (ROI)")
+        btn_fit_roi.clicked.connect(self.fit_roi)
+        ctrl_bar.addWidget(btn_fit_roi)
+
         btn_autorange = QPushButton("Fit / Auto Range")
         btn_autorange.clicked.connect(self.auto_range)
         ctrl_bar.addWidget(btn_autorange)
@@ -116,6 +124,7 @@ class PlotPanel(QWidget):
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground("#151720")
         self.plot_widget.showGrid(x=True, y=True, alpha=0.25)
+        self.plot_widget.getPlotItem().setClipToView(True)
         self.plot_widget.setLabel("bottom", "Time", units="s")
         self.plot_widget.setLabel("left", "Amplitude / Force", units="N / V")
         self.plot_widget.addLegend(offset=(10, 10))
@@ -339,7 +348,7 @@ class PlotPanel(QWidget):
             curve = self.plot_widget.plot(
                 time_vec,
                 y_data,
-                pen=pg.mkPen(color=col, width=1.8),
+                pen=pg.mkPen(color=col, width=1.8, cosmetic=True),
                 name=ch_key
             )
             self.active_curves[ch_key] = curve
@@ -383,6 +392,17 @@ class PlotPanel(QWidget):
         self.channel_list.blockSignals(False)
         self._replot_active_channels()
 
+    def plot_marker(self, marker_name: str, marker_data: np.ndarray):
+        """Add marker coordinates (X, Y, Z) to 2D plot panel."""
+        for comp_name, comp_idx in [("X", 0), ("Y", 1), ("Z", 2)]:
+            lbl = f"{marker_name} ({comp_name})"
+            self.add_custom_curve(lbl, marker_data[:, comp_idx])
+
+    def plot_markers(self, markers: Dict[str, np.ndarray]):
+        """Add multiple markers' coordinates (X, Y, Z) to 2D plot panel."""
+        for name, data in markers.items():
+            self.plot_marker(name, data)
+
     # ---------------------------------------------------------
     # Cursor Synchronization
     # ---------------------------------------------------------
@@ -416,3 +436,62 @@ class PlotPanel(QWidget):
                 self.time_cursor.setPen(pg.mkPen(color=accent, width=2, style=Qt.SolidLine))
         except Exception:
             pass
+
+    # ---------------------------------------------------------
+    # ROI & Trim Synchronization
+    # ---------------------------------------------------------
+    def set_trim_range(self, start_frame: int, end_frame: int):
+        """Update ROI Region of Interest shading on the 2D plot."""
+        if not self.trial:
+            return
+        n = self.trial.point_frame_count
+        start_f = max(0, min(n - 1, start_frame))
+        end_f = max(start_f, min(n - 1, end_frame))
+        self.trim_range = (start_f, end_f)
+
+        rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+        t_start = start_f / rate
+        t_end = end_f / rate
+        is_trimmed = (start_f > 0 or end_f < n - 1)
+
+        if self.roi_region is None:
+            self.roi_region = pg.LinearRegionItem(
+                values=[t_start, t_end],
+                orientation=pg.LinearRegionItem.Vertical,
+                brush=pg.mkBrush(0, 173, 181, 28),
+                pen=pg.mkPen(color="#00ADB5", width=1.5, style=Qt.DashLine),
+                hoverPen=pg.mkPen(color="#00E5FF", width=2.0, style=Qt.SolidLine),
+                movable=True
+            )
+            self.roi_region.setZValue(-10)
+            self.roi_region.sigRegionChanged.connect(self._on_roi_region_dragged)
+            self.plot_widget.addItem(self.roi_region)
+        else:
+            self.roi_region.blockSignals(True)
+            self.roi_region.setRegion([t_start, t_end])
+            self.roi_region.blockSignals(False)
+
+        self.roi_region.setVisible(is_trimmed)
+
+    def _on_roi_region_dragged(self):
+        if not self.roi_region or not self.trial:
+            return
+        bounds = self.roi_region.getRegion()
+        rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+        start_f = int(round(bounds[0] * rate))
+        end_f = int(round(bounds[1] * rate))
+        n = self.trial.point_frame_count
+        start_f = max(0, min(n - 1, start_f))
+        end_f = max(start_f, min(n - 1, end_f))
+        self.trim_range = (start_f, end_f)
+        self.trimRangeChanged.emit(start_f, end_f)
+
+    def fit_roi(self):
+        """Fit horizontal zoom strictly to trimmed ROI range."""
+        if not self.trial or not self.trim_range:
+            return
+        rate = self.trial.point_rate if self.trial.point_rate > 0 else 100.0
+        t_start = self.trim_range[0] / rate
+        t_end = self.trim_range[1] / rate
+        span = max(0.01, t_end - t_start)
+        self.plot_widget.setXRange(t_start - span * 0.04, t_end + span * 0.04, padding=0.0)

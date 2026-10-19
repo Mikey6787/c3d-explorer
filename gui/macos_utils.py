@@ -121,19 +121,23 @@ def clean_macos_edit_menu() -> None:
             u = _send_msg(objc, title_ns, "UTF8String", restype=ctypes.c_char_p)
             menu_name = u.decode() if u else ""
 
-            if menu_name == "Edit":
+            if "edit" in menu_name.lower():
                 submenu = _send_msg(objc, menuItem, "submenu")
                 if not submenu:
                     continue
 
-                unwanted_edit = ["autofill", "dictation", "emoji & symbols", "special characters"]
+                unwanted_edit = [
+                    "autofill", "auto-fill", "auto fill", "dictation",
+                    "emoji & symbols", "special characters", "substitutions",
+                    "speech", "spelling", "passwords"
+                ]
                 itemCount = _send_msg(objc, submenu, "numberOfItems", restype=ctypes.c_long)
                 for i in reversed(range(itemCount)):
                     subItem = _send_msg(objc, submenu, "itemAtIndex:", i, argtypes=[ctypes.c_long])
                     sub_title = _send_msg(objc, subItem, "title")
                     su = _send_msg(objc, sub_title, "UTF8String", restype=ctypes.c_char_p)
-                    t = su.decode() if su else ""
-                    if any(x in t.lower() for x in unwanted_edit):
+                    t = su.decode().lower() if su else ""
+                    if any(x in t for x in unwanted_edit):
                         _send_msg(objc, submenu, "removeItemAtIndex:", i, argtypes=[ctypes.c_long])
 
                 # Remove trailing separators
