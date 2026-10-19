@@ -1,25 +1,22 @@
-"""Writers and exporters for C3D, CSV, and STL files."""
+"""Writers and exporters for C3D, CSV, and STL files utilizing ezc3d."""
 
 import os
 import struct
+import copy
 from typing import List, Optional
 import numpy as np
 
 try:
-    import moveck_bridge_btk as btk
-    BTK_AVAILABLE = True
+    import ezc3d
+    EZC3D_AVAILABLE = True
 except ImportError:
-    try:
-        import btk
-        BTK_AVAILABLE = True
-    except ImportError:
-        BTK_AVAILABLE = False
+    EZC3D_AVAILABLE = False
 
 from core.data_models import C3DTrial
 
 
 class C3DWriter:
-    """Handles saving C3D trials and exporting to CSV and STL formats."""
+    """Handles saving C3D trials and exporting to CSV and STL formats using ezc3d."""
 
     @classmethod
     def save_c3d(
@@ -30,15 +27,16 @@ class C3DWriter:
         end_frame: Optional[int] = None
     ) -> None:
         """
-        Save acquisition back to C3D format using moveck_bridge_btk.
+        Save acquisition back to C3D format using ezc3d.
         Supports:
         - Newly created markers (e.g. from average marker tools)
         - Renamed and modified markers
         - Discrete C3D events
         - Slicing and exporting trimmed frame ranges [start_frame, end_frame]
+        - Force platform parameter and channel preservation
         """
-        if not BTK_AVAILABLE:
-            raise RuntimeError("moveck_bridge_btk is required to write C3D files.")
+        if not EZC3D_AVAILABLE:
+            raise RuntimeError("ezc3d is required to write C3D files. Please install it with 'pip install ezc3d'.")
 
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
 
@@ -50,371 +48,114 @@ class C3DWriter:
 
         start_frame = max(0, min(total_frames - 1, start_frame))
         end_frame = max(start_frame, min(total_frames - 1, end_frame))
+        trim_frames = end_frame - start_frame + 1
 
-        is_trimmed = (start_frame > 0 or end_frame < total_frames - 1)
-
-        if not is_trimmed:
-            # -------------------------------------------------------------
-            # Full Trial Save / Export
-            # -------------------------------------------------------------
-            acq = trial.btk_handle
-            if acq is None:
-                raise ValueError("No BTK acquisition handle available.")
-
-            # 1. Synchronize point labels and values
-            existing_count = int(btk.btkGetPointNumber(acq))
-            existing_labels = {}
-            for i in range(existing_count):
-                try:
-                    _, info = btk.btkGetPoint(acq, i)
-                    existing_labels[i] = info.get('label', f'Point_{i}')
-                except Exception:
-                    existing_labels[i] = f'Point_{i}'
-
-            markers_handled = set()
-            # Update existing points matching trial markers
-            for i in range(existing_count):
-                old_lbl = existing_labels[i]
-                if old_lbl in trial.markers:
-                    try:
-                        btk.btkSetPointValues(acq, i, np.asarray(trial.markers[old_lbl], dtype=np.float64))
-                        markers_handled.add(old_lbl)
-                    except Exception as e:
-                        print(f"Warning updating point {old_lbl}: {e}")
-
-            # For existing points that were renamed:
-            unhandled_trial_markers = [m for m in trial.markers.keys() if m not in markers_handled]
-            for i in range(existing_count):
-                old_lbl = existing_labels[i]
-                if old_lbl not in trial.markers and unhandled_trial_markers:
-                    new_lbl = unhandled_trial_markers.pop(0)
-                    try:
-                        btk.btkSetPointLabel(acq, i, new_lbl)
-                        btk.btkSetPointValues(acq, i, np.asarray(trial.markers[new_lbl], dtype=np.float64))
-                        markers_handled.add(new_lbl)
-                    except Exception as e:
-                        print(f"Warning renaming point {old_lbl} -> {new_lbl}: {e}")
-
-            # Append any remaining newly created markers
-            for name, arr in trial.markers.items():
-                if name not in markers_handled:
-                    try:
-                        btk.btkAppendPoint(acq, 'marker', name, np.asarray(arr, dtype=np.float64))
-                    except Exception as e:
-                        print(f"Warning appending new marker {name}: {e}")
-
-            # 2. Synchronize discrete C3D events
-            try:
-                btk.btkClearEvents(acq)
-                for ev in trial.events:
-                    ctx = ev.context if ev.context else "General"
-                    lbl = ev.name
-                    if lbl.lower().startswith(ctx.lower()):
-                        lbl_clean = lbl[len(ctx):].lstrip(" _-")
-                        if lbl_clean:
-                            lbl = lbl_clean
-
-                    desc = getattr(ev, "description", "") or ""
-                    subj = getattr(ev, "subject", "") or ""
-                    btk.btkAppendEvent(
-                        acq,
-                        lbl,
-                        float(ev.time),
-                        ctx,
-                        subj,
-                        desc
-                    )
-            except Exception as e:
-                print(f"Warning synchronizing events before saving C3D: {e}")
-
-            btk.btkWriteAcquisition(acq, output_path)
-
+        # Check if we have an existing ezc3d handle or trial file
+        if trial.btk_handle is not None and isinstance(trial.btk_handle, (ezc3d.c3d, dict)):
+            c = copy.deepcopy(trial.btk_handle)
+        elif trial.file_path and os.path.isfile(trial.file_path):
+            c = ezc3d.c3d(trial.file_path)
         else:
-            # -------------------------------------------------------------
-            # Trimmed Region Export: slice to [start_frame, end_frame]
-            # -------------------------------------------------------------
-            trim_frames = end_frame - start_frame + 1
-            num_markers = len(trial.markers)
-            num_analogs = len(trial.analogs)
-            nsf = max(1, trial.analog_subsamples)
+            # Create a brand new C3D file
+            c = ezc3d.c3d()
+            c['header']['points']['frame_rate'] = float(trial.point_rate)
+            c['parameters']['POINT']['RATE']['value'] = [float(trial.point_rate)]
 
-            new_acq = btk.btkNewAcquisition(num_markers, trim_frames, num_analogs, nsf)
-            btk.btkSetFrequency(new_acq, float(trial.point_rate))
+        # 1. Synchronize Markers
+        marker_names = list(trial.markers.keys())
+        num_markers = len(marker_names)
 
-            orig_first_frame = 1
-            if trial.btk_handle:
-                try:
-                    orig_first_frame = int(btk.btkGetFirstFrame(trial.btk_handle))
-                except Exception:
-                    orig_first_frame = 1
-            btk.btkSetFirstFrame(new_acq, orig_first_frame + start_frame)
+        # Build 3D points array: shape (4, num_markers, trim_frames)
+        new_pts = np.zeros((4, num_markers, trim_frames), dtype=np.float64)
+        for idx, name in enumerate(marker_names):
+            m_data = trial.markers[name]
+            sliced = m_data[start_frame:end_frame + 1, :]
+            new_pts[:3, idx, :] = sliced.T
+            new_pts[3, idx, :] = 0.0  # Residual = 0 (valid marker point)
 
-            # Copy general metadata groups (MANUFACTURER, PROCESSING, etc.)
-            if trial.btk_handle:
-                try:
-                    md = btk.btkGetMetaData(trial.btk_handle)
-                    for grp_name, grp_data in md.get('children', {}).items():
-                        if grp_name in ['POINT', 'ANALOG']:
-                            continue
-                        if isinstance(grp_data, dict) and isinstance(grp_data.get('children'), dict):
-                            for p_name, p_data in grp_data['children'].items():
-                                if isinstance(p_data, dict) and isinstance(p_data.get('info'), dict):
-                                    info = dict(p_data['info'])
-                                    val = info.get('values')
-                                    if hasattr(val, 'shape'):
-                                        info['dims'] = np.array(val.shape, dtype=np.int32)
-                                    else:
-                                        info['dims'] = np.array([], dtype=np.int32)
-                                    try:
-                                        btk.btkAppendMetaData(new_acq, grp_name, p_name, info)
-                                    except Exception:
-                                        pass
-                except Exception as e:
-                    print(f"Warning copying metadata to trimmed acquisition: {e}")
+        c['data']['points'] = new_pts
+        c['parameters']['POINT']['LABELS']['value'] = marker_names
+        c['parameters']['POINT']['USED']['value'] = [num_markers]
+        c['parameters']['POINT']['FRAMES']['value'] = [trim_frames]
+        if 'meta_points' in c['data']:
+            del c['data']['meta_points']
 
-            # Populate sliced markers
-            for idx, (name, arr) in enumerate(trial.markers.items()):
-                sliced_marker = np.asarray(arr[start_frame:end_frame + 1, :], dtype=np.float64)
-                btk.btkSetPointLabel(new_acq, idx, name)
-                btk.btkSetPointValues(new_acq, idx, sliced_marker)
+        # 2. Synchronize Analogs
+        sub = max(1, trial.analog_subsamples)
+        analog_start = start_frame * sub
+        analog_end = (end_frame + 1) * sub
+        trim_analog_frames = trim_frames * sub
 
-            # Populate sliced analogs
-            analog_start = start_frame * nsf
-            analog_end = (end_frame + 1) * nsf
-            for idx, (name, arr) in enumerate(trial.analogs.items()):
-                sliced_analog = np.asarray(arr[analog_start:analog_end], dtype=np.float64)
-                if sliced_analog.ndim == 1:
-                    sliced_analog = sliced_analog[:, np.newaxis]
-                btk.btkSetAnalogLabel(new_acq, idx, name)
-                btk.btkSetAnalogValues(new_acq, idx, sliced_analog)
+        if 'analogs' in c['data'] and c['data']['analogs'].ndim >= 3 and c['data']['analogs'].shape[2] > 0:
+            orig_analog_frames = c['data']['analogs'].shape[2]
+            actual_end = min(orig_analog_frames, analog_end)
+            actual_start = min(orig_analog_frames, analog_start)
+            c['data']['analogs'] = c['data']['analogs'][:, :, actual_start:actual_end]
+        elif trial.analogs:
+            a_names = list(trial.analogs.keys())
+            num_analogs = len(a_names)
+            new_analogs = np.zeros((1, num_analogs, trim_analog_frames), dtype=np.float64)
+            for idx, name in enumerate(a_names):
+                a_data = trial.analogs[name]
+                sliced_a = a_data[analog_start:min(len(a_data), analog_end)]
+                new_analogs[0, idx, :len(sliced_a)] = sliced_a
+            c['data']['analogs'] = new_analogs
+            c['parameters']['ANALOG']['LABELS']['value'] = a_names
+            c['parameters']['ANALOG']['USED']['value'] = [num_analogs]
 
-            # Populate events within trim range
-            try:
-                for ev in trial.events:
-                    if start_frame <= ev.frame <= end_frame:
-                        rel_frame = ev.frame - start_frame
-                        rel_time = rel_frame / trial.point_rate if trial.point_rate > 0 else 0.0
-                        ctx = ev.context if ev.context else "General"
-                        lbl = ev.name
-                        if lbl.lower().startswith(ctx.lower()):
-                            lbl_clean = lbl[len(ctx):].lstrip(" _-")
-                            if lbl_clean:
-                                lbl = lbl_clean
+        # 3. Synchronize Frame Range in Header
+        orig_first = trial.first_frame
+        c['header']['points']['first_frame'] = int(orig_first + start_frame)
+        c['header']['points']['last_frame'] = int(orig_first + end_frame)
+        c['header']['points']['frame_rate'] = float(trial.point_rate)
 
-                        desc = getattr(ev, "description", "") or ""
-                        subj = getattr(ev, "subject", "") or ""
-                        btk.btkAppendEvent(
-                            new_acq,
-                            lbl,
-                            float(rel_time),
-                            ctx,
-                            subj,
-                            desc
-                        )
-            except Exception as e:
-                print(f"Warning copying events to trimmed acquisition: {e}")
+        # 4. Synchronize Force Platform parameters if created from scratch
+        if 'FORCE_PLATFORM' not in c['parameters'] and trial.force_platforms:
+            num_fp = len(trial.force_platforms)
+            c.add_parameter("FORCE_PLATFORM", "USED", [num_fp])
+            c.add_parameter("FORCE_PLATFORM", "TYPE", [fp.type for fp in trial.force_platforms])
+            c.add_parameter("FORCE_PLATFORM", "ZERO", [1, 0])
+            corners_arr = np.zeros((3, 4, num_fp), dtype=np.float32)
+            origins_arr = np.zeros((3, num_fp), dtype=np.float32)
+            for i, fp in enumerate(trial.force_platforms):
+                corners_arr[:, :, i] = fp.corners
+                origins_arr[:, i] = fp.origin
+            c.add_parameter("FORCE_PLATFORM", "CORNERS", corners_arr)
+            c.add_parameter("FORCE_PLATFORM", "ORIGIN", origins_arr)
 
-            btk.btkWriteAcquisition(new_acq, output_path)
+        # 5. Synchronize Events
+        if 'EVENT' in c['parameters']:
+            del c['parameters']['EVENT']
 
-        # Ensure force platform geometry & metadata are preserved in the exported C3D file
-        if trial.force_platforms:
-            cls._preserve_force_platforms(trial, output_path)
+        for ev in trial.events:
+            if start_frame <= ev.frame <= end_frame:
+                rel_frame = ev.frame - start_frame
+                rel_time = rel_frame / trial.point_rate if trial.point_rate > 0 else 0.0
 
-    @classmethod
-    def _preserve_force_platforms(cls, trial: C3DTrial, output_path: str) -> None:
-        """
-        Ensure the exported C3D file at output_path preserves all force platform parameters
-        (geometry, corners, origin, channel mappings, calibration matrices) from the original trial.
-        """
-        if not trial.force_platforms or not os.path.exists(output_path):
-            return
+                ctx = ev.context if ev.context else "General"
+                lbl = ev.name
+                if lbl.lower().startswith(ctx.lower()):
+                    lbl_clean = lbl[len(ctx):].lstrip(" _-")
+                    if lbl_clean:
+                        lbl = lbl_clean
 
-        try:
-            with open(output_path, "rb") as f:
-                written_data = f.read()
+                desc = getattr(ev, "description", "") or ""
+                subj = getattr(ev, "subject", "") or ""
+                ev_id = getattr(ev, "event_id", 0) or 0
 
-            w_header = bytearray(written_data[:512])
-            w_pblock = w_header[0]
-            w_dblock = struct.unpack("<H", w_header[16:18])[0]
-            w_pstart = (w_pblock - 1) * 512
-            w_pend = (w_dblock - 1) * 512
-            w_pdata = written_data[w_pstart:w_pend]
-            data_section = written_data[w_pend:]
+                minutes = int(rel_time // 60)
+                seconds = float(rel_time % 60)
+                c.add_event(
+                    time=[minutes, seconds],
+                    context=ctx,
+                    label=lbl,
+                    description=desc,
+                    subject=subj,
+                    icon_id=ev_id
+                )
 
-            idx = 4
-            w_fp_gid = None
-            kept_entries = []
-            has_valid_fp = False
-
-            while idx < len(w_pdata):
-                if idx + 2 > len(w_pdata):
-                    break
-                entry_start = idx
-                name_len = struct.unpack("b", w_pdata[idx:idx+1])[0]
-                group_id = struct.unpack("b", w_pdata[idx+1:idx+2])[0]
-                idx += 2
-                if name_len == 0:
-                    break
-                abs_len = abs(name_len)
-                name = w_pdata[idx:idx+abs_len].decode("ascii", errors="ignore").upper()
-                idx += abs_len
-                offset = struct.unpack("<h", w_pdata[idx:idx+2])[0]
-                idx += 2
-                entry_end = (idx - 2) + offset if offset != 0 else len(w_pdata)
-
-                if group_id < 0:
-                    gid = abs(group_id)
-                    if name == "FORCE_PLATFORM":
-                        w_fp_gid = gid
-                    else:
-                        kept_entries.append(w_pdata[entry_start:entry_end])
-                else:
-                    if group_id == w_fp_gid:
-                        if name == "USED":
-                            pdata_start = idx + 2 + w_pdata[idx+1]
-                            val = struct.unpack("<h", w_pdata[pdata_start:pdata_start+2])[0]
-                            if val > 0:
-                                has_valid_fp = True
-                    else:
-                        kept_entries.append(w_pdata[entry_start:entry_end])
-
-                if offset == 0:
-                    break
-                idx = entry_end
-
-            if has_valid_fp:
-                return
-
-            new_fp_entries = []
-            target_gid = w_fp_gid if w_fp_gid is not None else 5
-            extracted = False
-
-            if trial.file_path and os.path.exists(trial.file_path):
-                try:
-                    with open(trial.file_path, "rb") as f:
-                        orig_data = f.read()
-                    orig_header = orig_data[:512]
-                    orig_pblock = orig_header[0]
-                    orig_dblock = struct.unpack("<H", orig_header[16:18])[0]
-                    orig_pdata = orig_data[(orig_pblock - 1) * 512: (orig_dblock - 1) * 512]
-
-                    idx = 4
-                    orig_fp_gid = None
-                    orig_fp_params = []
-
-                    while idx < len(orig_pdata):
-                        if idx + 2 > len(orig_pdata):
-                            break
-                        entry_start = idx
-                        name_len = struct.unpack("b", orig_pdata[idx:idx+1])[0]
-                        group_id = struct.unpack("b", orig_pdata[idx+1:idx+2])[0]
-                        idx += 2
-                        if name_len == 0:
-                            break
-                        abs_len = abs(name_len)
-                        name = orig_pdata[idx:idx+abs_len].decode("ascii", errors="ignore").upper()
-                        idx += abs_len
-                        offset = struct.unpack("<h", orig_pdata[idx:idx+2])[0]
-                        idx += 2
-                        entry_end = (idx - 2) + offset if offset != 0 else len(orig_pdata)
-
-                        if group_id < 0:
-                            if name == "FORCE_PLATFORM":
-                                orig_fp_gid = abs(group_id)
-                        else:
-                            if group_id == orig_fp_gid:
-                                orig_fp_params.append(orig_pdata[entry_start:entry_end])
-
-                        if offset == 0:
-                            break
-                        idx = entry_end
-
-                    if orig_fp_params:
-                        grp_name = b"FORCE_PLATFORM"
-                        grp_desc = b"Force platform parameters"
-                        grp_offset = 2 + 1 + len(grp_desc)
-                        grp_entry = struct.pack("bb", -len(grp_name), -target_gid) + grp_name + struct.pack("<h", grp_offset) + struct.pack("B", len(grp_desc)) + grp_desc
-                        new_fp_entries.append(grp_entry)
-                        for param_bytes in orig_fp_params:
-                            p_mut = bytearray(param_bytes)
-                            p_mut[1] = target_gid
-                            new_fp_entries.append(bytes(p_mut))
-                        extracted = True
-                except Exception as e:
-                    print(f"Warning reading original force platform parameters: {e}")
-
-            if not extracted:
-                grp_name = b"FORCE_PLATFORM"
-                grp_desc = b"Force platform parameters"
-                grp_offset = 2 + 1 + len(grp_desc)
-                grp_entry = struct.pack("bb", -len(grp_name), -target_gid) + grp_name + struct.pack("<h", grp_offset) + struct.pack("B", len(grp_desc)) + grp_desc
-                new_fp_entries.append(grp_entry)
-
-                num_fp = len(trial.force_platforms)
-                def make_param(pname, type_code, dims, data_bytes, pdesc=b""):
-                    payload = struct.pack("bB", type_code, len(dims)) + bytes(dims) + data_bytes + struct.pack("B", len(pdesc)) + pdesc
-                    offset = 2 + len(payload)
-                    return struct.pack("bb", len(pname), target_gid) + pname.encode("ascii") + struct.pack("<h", offset) + payload
-
-                new_fp_entries.append(make_param("USED", 2, [], struct.pack("<h", num_fp)))
-                types = [fp.type for fp in trial.force_platforms]
-                new_fp_entries.append(make_param("TYPE", 2, [num_fp], struct.pack(f"<{num_fp}h", *types)))
-                new_fp_entries.append(make_param("ZERO", 2, [2], struct.pack("<2h", 1, 0)))
-                corners_data = b"".join([fp.corners.astype(np.float32).tobytes(order='F') for fp in trial.force_platforms])
-                new_fp_entries.append(make_param("CORNERS", 4, [3, 4, num_fp], corners_data))
-                origin_data = b"".join([fp.origin.astype(np.float32).tobytes(order='F') for fp in trial.force_platforms])
-                new_fp_entries.append(make_param("ORIGIN", 4, [3, num_fp], origin_data))
-
-                all_channel_names = list(trial.analogs.keys())
-                chan_cols = []
-                for fp in trial.force_platforms:
-                    ch_list = []
-                    for ch_name in fp.channels.keys():
-                        if ch_name in all_channel_names:
-                            ch_list.append(all_channel_names.index(ch_name) + 1)
-                    while len(ch_list) < 6:
-                        ch_list.append(0)
-                    chan_cols.append(ch_list[:8] if len(ch_list) >= 8 else ch_list[:6])
-                n_ch = max(len(c) for c in chan_cols) if chan_cols else 6
-                for c in chan_cols:
-                    while len(c) < n_ch:
-                        c.append(0)
-                chan_mat = np.array(chan_cols, dtype=np.int16).T
-                new_fp_entries.append(make_param("CHANNEL", 2, [n_ch, num_fp], chan_mat.tobytes(order='F')))
-
-            all_entries = kept_entries + new_fp_entries
-            relinked_data = bytearray(4)
-            relinked_data[0] = 0
-            relinked_data[1] = 0x50
-            relinked_data[3] = 84
-
-            for i, entry in enumerate(all_entries):
-                entry_mut = bytearray(entry)
-                name_len = abs(struct.unpack("b", entry_mut[:1])[0])
-                offset_pos = 2 + name_len
-                if i < len(all_entries) - 1:
-                    next_offset = len(entry_mut) - offset_pos
-                    struct.pack_into("<h", entry_mut, offset_pos, next_offset)
-                else:
-                    struct.pack_into("<h", entry_mut, offset_pos, 0)
-                relinked_data.extend(entry_mut)
-
-            pad_len = (512 - (len(relinked_data) % 512)) % 512
-            if pad_len > 0:
-                relinked_data.extend(b"\x00" * pad_len)
-
-            total_param_blocks = len(relinked_data) // 512
-            relinked_data[2] = total_param_blocks
-
-            new_dblock = w_pblock + total_param_blocks
-            struct.pack_into("<H", w_header, 16, new_dblock)
-
-            with open(output_path, "wb") as f:
-                f.write(w_header)
-                f.write(relinked_data)
-                f.write(data_section)
-        except Exception as e:
-            print(f"Warning preserving force platform metadata: {e}")
+        # Write out C3D
+        c.write(output_path)
 
     @classmethod
     def export_markers_csv(
@@ -493,10 +234,10 @@ class C3DWriter:
         Each marker is exported as a 3D octahedron / sphere approximation.
         """
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-        
+
         triangles: List[np.ndarray] = []
 
-        # 1. Force plates geometry (top surface and 20mm thickness box)
+        # 1. Force plates geometry (top surface and 25mm thickness box)
         thickness = 25.0  # 25 mm plate depth downward
         for fp in trial.force_platforms:
             c = fp.corners  # Shape (3, 4)
@@ -554,7 +295,7 @@ class C3DWriter:
             f.write(header_bytes)
             # Number of triangles (uint32)
             f.write(struct.pack("<I", len(triangles)))
-            
+
             for tri in triangles:
                 v1, v2, v3 = tri[0], tri[1], tri[2]
                 # Compute normal

@@ -15,7 +15,7 @@ from core.c3d_reader import get_event_color
 
 
 class EventEditDialog(QDialog):
-    """Dialog to create or edit a discrete C3D event with all parameters supported by BTK."""
+    """Dialog to create or edit a discrete C3D event with all parameters supported by the C3D format."""
 
     def __init__(
         self,
@@ -107,7 +107,7 @@ class EventEditDialog(QDialog):
         self.txt_desc.setPlaceholderText("Optional description (e.g. Right Heel Strike)")
         form.addRow("Description:", self.txt_desc)
 
-        # Internal Event ID (managed automatically in background according to Moveck standard)
+        # Internal Event ID (managed automatically in background according to C3D standard)
         self.spin_id = QSpinBox()
         self.spin_id.setRange(0, 9999)
         self.spin_id.setValue(0)

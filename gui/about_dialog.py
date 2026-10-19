@@ -118,7 +118,7 @@ class AboutDialog(QDialog):
 
         # ---------------- 4. Bottom Close Button ----------------
         btn_layout = QHBoxLayout()
-        tech_note = QLabel("Powered by <b>PySide6</b>, <b>PyQtGraph</b> & <b>moveck_bridge_btk</b>")
+        tech_note = QLabel("Powered by <b>PySide6</b>, <b>PyQtGraph</b> & <b>ezc3d</b>")
         tech_note.setStyleSheet("font-size: 11px; color: #64748B;")
         btn_layout.addWidget(tech_note)
         btn_layout.addStretch()

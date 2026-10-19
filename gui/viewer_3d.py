@@ -855,10 +855,16 @@ class Viewer3D(QWidget):
                     f_vec = np.mean(fp.forces[analog_idx:end_idx], axis=0)
                     cop_pt = np.mean(fp.cop[analog_idx:end_idx], axis=0)
 
-                    cop_v = self.transform_point(cop_pt)
-                    f_vec_v = self.transform_point(f_vec)
-                    f_mag = float(np.linalg.norm(f_vec_v))
-                    if abs(f_vec_v[2]) >= self.grf_threshold_n and f_mag > 1e-3 and not np.any(np.isnan(cop_v)):
+                    f_vert = float(abs(f_vec[2]))
+                    f_mag = float(np.linalg.norm(f_vec))
+                    max_dist = float(max(getattr(fp, "width", 600.0), getattr(fp, "length", 600.0)) * 1.5)
+
+                    if (f_vert >= self.grf_threshold_n and f_mag > 1e-3 and
+                        not np.any(np.isnan(cop_pt)) and
+                        np.linalg.norm(cop_pt - fp.center) <= max_dist):
+
+                        cop_v = self.transform_point(cop_pt)
+                        f_vec_v = self.transform_point(f_vec)
                         f_dir = f_vec_v / f_mag
                         scaled_len = f_mag * self.grf_vector_scale
                         end_pt = cop_v + f_dir * scaled_len

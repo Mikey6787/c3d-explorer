@@ -1,6 +1,6 @@
 # C3D Explorer — Biomechanics & Motion Capture Workstation
 
-A cross-platform desktop application (Windows & macOS) for visualizing, analyzing, and editing C3D motion capture files, built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **Moveck Bridge BTK** (`moveck_bridge_btk`).
+A cross-platform desktop application (Windows & macOS) for visualizing, analyzing, and editing C3D motion capture files, built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **ezc3d** (`ezc3d`).
 
 ---
 
@@ -66,7 +66,7 @@ Under **`Tools -> Plotter...`** (`Ctrl+P` / `Cmd+P`):
 
 ### 7. Event Management & Creation
 Under **`Tools -> Events`** (or timeline right-click):
-- **Add Event at Current Frame (`Ctrl+E` / `Cmd+E`)**: Prompts an event creation dialog requesting all C3D/BTK parameters:
+- **Add Event at Current Frame (`Ctrl+E` / `Cmd+E`)**: Prompts an event creation dialog requesting all C3D parameters:
   - **Event Label**: Presets (`Foot Strike`, `Foot Off`, `Heel Strike`, `Toe Off`, `Initial Contact`, `Event`, `Start`, `End`) or custom input.
   - **Context / Leg**: `Right`, `Left`, `General`, or custom context.
   - **Synchronized Timing**: Edit by **Frame number** or **Time in seconds** with real-time conversion.
@@ -75,7 +75,7 @@ Under **`Tools -> Events`** (or timeline right-click):
   - **Event ID**: Numeric index.
   - **Badge Color**: Auto-assigned or custom color picker.
 - **Manage Events Dialog**: Full tabular event manager to review, edit, delete, or clear all events.
-- **Export & Persistence**: All created, modified, or deleted events are automatically synchronized into the BTK acquisition structure and saved when exporting/saving C3D files.
+- **Export & Persistence**: All created, modified, or deleted events are automatically synchronized into the C3D acquisition structure and saved when exporting/saving C3D files.
 
 ### 8. Interactive 3D Marker Picking & Analysis Tools
 - **Direct 3D Marker Picking**:
@@ -131,7 +131,7 @@ Under **`Settings -> Visual Configurations...`**:
 - Python 3.10, 3.11, 3.12, or 3.13
 - Dependencies:
   ```bash
-  pip install moveck_bridge_btk PySide6 pyqtgraph pyopengl numpy
+  pip install ezc3d PySide6 pyqtgraph pyopengl numpy
   ```
 
 ### Launching the Application

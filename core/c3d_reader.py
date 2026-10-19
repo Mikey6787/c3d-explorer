@@ -1,20 +1,17 @@
-"""C3D file reader utilizing moveck_bridge_btk."""
+"""C3D file reader utilizing ezc3d and native GRW calculation."""
 
 import os
 from typing import Optional, List, Dict, Any
 import numpy as np
 
 try:
-    import moveck_bridge_btk as btk
-    BTK_AVAILABLE = True
+    import ezc3d
+    EZC3D_AVAILABLE = True
 except ImportError:
-    try:
-        import btk
-        BTK_AVAILABLE = True
-    except ImportError:
-        BTK_AVAILABLE = False
+    EZC3D_AVAILABLE = False
 
 from core.data_models import C3DTrial, ForcePlatformData, C3DEvent
+from core.grw_calculator import compute_ground_reaction_wrenches
 
 
 def get_event_color(label: str, context: str) -> str:
@@ -42,231 +39,262 @@ def get_event_color(label: str, context: str) -> str:
 
 
 class C3DReader:
-    """Reads C3D files using moveck_bridge_btk and builds C3DTrial models."""
+    """Reads C3D files using ezc3d and builds C3DTrial models."""
 
     @staticmethod
     def is_available() -> bool:
-        return BTK_AVAILABLE
+        return EZC3D_AVAILABLE
 
     @classmethod
     def read(cls, file_path: str) -> C3DTrial:
-        """Parse a C3D file from disk."""
+        """Parse a C3D file from disk using ezc3d."""
         if not cls.is_available():
             raise RuntimeError(
-                "moveck_bridge_btk is not installed. Please install it with 'pip install moveck_bridge_btk'."
+                "ezc3d is not installed. Please install it with 'pip install ezc3d'."
             )
-        
+
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        # Read acquisition
-        acq = btk.btkReadAcquisition(file_path)
-        if acq is None:
+        # Read acquisition with force platform computation enabled
+        try:
+            c = ezc3d.c3d(file_path, extract_forceplat_data=True)
+        except Exception:
+            # Fallback if strict extraction fails on malformed files
+            c = ezc3d.c3d(file_path, extract_forceplat_data=False, ignore_bad_formatting=True)
+
+        if c is None:
             raise ValueError(f"Failed to load C3D acquisition from {file_path}")
 
         # Frame and sample rate properties
-        first_frame = int(btk.btkGetFirstFrame(acq))
-        last_frame = int(btk.btkGetLastFrame(acq))
-        point_rate = float(btk.btkGetPointFrequency(acq))
-        point_frame_count = int(btk.btkGetPointFrameNumber(acq))
-        
+        first_frame = int(c['header']['points']['first_frame'])
+        last_frame = int(c['header']['points']['last_frame'])
+        point_rate = float(c['header']['points']['frame_rate'])
+
+        # Points shape in ezc3d is (4, n_points, n_frames) -> (X, Y, Z, residual)
+        points_data = c['data']['points']
+        if points_data.ndim >= 3:
+            point_frame_count = int(points_data.shape[2])
+        else:
+            point_frame_count = max(0, last_frame - first_frame + 1)
+
         # Analog properties
-        try:
-            analog_rate = float(btk.btkGetAnalogFrequency(acq))
-            analog_frame_count = int(btk.btkGetAnalogFrameNumber(acq))
-        except Exception:
-            analog_rate = 0.0
-            analog_frame_count = 0
-            
-        analog_subsamples = int(btk.btkGetAnalogSampleNumberPerFrame(acq)) if hasattr(btk, 'btkGetAnalogSampleNumberPerFrame') else 0
-        if analog_subsamples <= 0 and point_rate > 0 and analog_rate > 0:
-            analog_subsamples = int(round(analog_rate / point_rate))
+        analog_rate = 0.0
+        analog_frame_count = 0
+        if 'analogs' in c['header']:
+            analog_rate = float(c['header']['analogs']['frame_rate'])
+        if 'analogs' in c['data'] and c['data']['analogs'].ndim >= 3:
+            analog_frame_count = int(c['data']['analogs'].shape[2])
+
+        analog_subsamples = int(round(analog_rate / point_rate)) if point_rate > 0 and analog_rate > 0 else 0
 
         # Markers
         markers_dict: Dict[str, np.ndarray] = {}
         marker_units = "mm"
         try:
-            raw_markers = btk.btkGetMarkers(acq)
-            if isinstance(raw_markers, (list, tuple)) and len(raw_markers) > 0:
-                if isinstance(raw_markers[0], dict):
-                    markers_dict = raw_markers[0]
-                if len(raw_markers) > 1 and isinstance(raw_markers[1], dict):
-                    units_map = raw_markers[1].get('units', {})
-                    if isinstance(units_map, dict):
-                        marker_units = units_map.get('ALLMARKERS', marker_units)
-                    elif isinstance(units_map, str):
-                        marker_units = units_map
+            if 'POINT' in c['parameters']:
+                point_params = c['parameters']['POINT']
+                labels = point_params.get('LABELS', {}).get('value', [])
+                units_val = point_params.get('UNITS', {}).get('value', ['mm'])
+                if isinstance(units_val, (list, tuple)) and len(units_val) > 0:
+                    marker_units = str(units_val[0]).strip()
+                elif isinstance(units_val, str):
+                    marker_units = units_val.strip()
+
+                for idx, lbl in enumerate(labels):
+                    clean_name = str(lbl).strip()
+                    if idx < points_data.shape[1]:
+                        # Extract 3D coordinates (n_frames, 3)
+                        markers_dict[clean_name] = np.ascontiguousarray(
+                            points_data[:3, idx, :].T, dtype=np.float32
+                        )
         except Exception as e:
-            print(f"Warning parsing markers: {e}")
+            print(f"Warning parsing markers with ezc3d: {e}")
 
         # Analogs
         analogs_dict: Dict[str, np.ndarray] = {}
         analog_units: Dict[str, str] = {}
         try:
-            raw_analogs = btk.btkGetAnalogs(acq)
-            if isinstance(raw_analogs, (list, tuple)) and len(raw_analogs) > 0:
-                if isinstance(raw_analogs[0], dict):
-                    analogs_dict = raw_analogs[0]
-                if len(raw_analogs) > 1 and isinstance(raw_analogs[1], dict):
-                    analog_units = raw_analogs[1].get('units', {})
-        except Exception as e:
-            print(f"Warning parsing analogs: {e}")
+            if 'ANALOG' in c['parameters'] and 'analogs' in c['data'] and c['data']['analogs'].ndim >= 3:
+                analog_params = c['parameters']['ANALOG']
+                a_labels = analog_params.get('LABELS', {}).get('value', [])
+                a_units = analog_params.get('UNITS', {}).get('value', [])
+                a_data = c['data']['analogs'][0]  # shape (n_analogs, n_analog_frames)
 
-        # Ground Reaction Wrenches (Forces, Moments, Center of Pressure)
-        grw_list = []
-        try:
-            raw_grw = btk.btkGetGroundReactionWrenches(acq)
-            if isinstance(raw_grw, (list, tuple, np.ndarray)):
-                for item in raw_grw:
-                    if isinstance(item, dict):
-                        grw_list.append(item)
+                for idx, lbl in enumerate(a_labels):
+                    clean_name = str(lbl).strip()
+                    if idx < a_data.shape[0]:
+                        analogs_dict[clean_name] = np.ascontiguousarray(a_data[idx, :], dtype=np.float32)
+                        if isinstance(a_units, (list, tuple)) and idx < len(a_units):
+                            analog_units[clean_name] = str(a_units[idx]).strip()
+                        else:
+                            analog_units[clean_name] = "V"
         except Exception as e:
-            print(f"Warning calculating ground reaction wrenches: {e}")
+            print(f"Warning parsing analogs with ezc3d: {e}")
 
-        # Force Platforms
+        # Force Platforms & Ground Reaction Wrenches (Forces, Moments, Center of Pressure)
         force_platforms: List[ForcePlatformData] = []
         try:
-            raw_fps = btk.btkGetForcePlatforms(acq)
-            if isinstance(raw_fps, (list, tuple, np.ndarray)) and len(raw_fps) > 0:
-                fp_items = raw_fps[0] if isinstance(raw_fps[0], (list, np.ndarray)) else raw_fps
-                for i, fp_dict in enumerate(fp_items):
-                    if not isinstance(fp_dict, dict):
-                        continue
-                    
-                    corners = fp_dict.get('corners', np.zeros((3, 4)))
-                    origin = fp_dict.get('origin', np.zeros((3,)))
-                    fp_type = int(fp_dict.get('type', 1))
-                    channels = fp_dict.get('channels', {})
-                    
-                    # Extract forces / moments / COP if available from GRW
-                    forces = None
-                    moments = None
-                    cop = None
-                    if i < len(grw_list):
-                        forces = grw_list[i].get('F')
-                        moments = grw_list[i].get('M')
-                        cop = grw_list[i].get('P')
+            # Compute Ground Reaction Wrenches using Shimba (1984) algorithm with 10N threshold
+            python_grw = compute_ground_reaction_wrenches(c, threshold=10.0)
 
-                    cal_mat = None
-                    if len(raw_fps) > 1 and i < len(raw_fps[1]):
-                        sub_dict = raw_fps[1][i]
-                        if isinstance(sub_dict, list) and len(sub_dict) > 0:
-                            sub_dict = sub_dict[0]
-                        if isinstance(sub_dict, dict):
-                            cal_mat = sub_dict.get('cal_matrix')
+            # Read parameters from FORCE_PLATFORM parameter group
+            fp_params = c['parameters'].get('FORCE_PLATFORM', {})
+            n_fp = int(fp_params.get('USED', {}).get('value', [0])[0]) if 'USED' in fp_params else len(python_grw)
+            types = np.atleast_1d(fp_params.get('TYPE', {}).get('value', [1]))
+            corners_all = fp_params.get('CORNERS', {}).get('value')
+            origins_all = fp_params.get('ORIGIN', {}).get('value')
+            channels_all = fp_params.get('CHANNEL', {}).get('value')
+            cal_mats = fp_params.get('CAL_MATRIX', {}).get('value')
 
-                    fp_data = ForcePlatformData(
-                        id=i + 1,
-                        type=fp_type,
-                        corners=np.array(corners, dtype=np.float32),
-                        origin=np.array(origin, dtype=np.float32),
-                        channels=channels if isinstance(channels, dict) else {},
-                        forces=forces,
-                        moments=moments,
-                        cop=cop,
-                        cal_matrix=cal_mat
-                    )
-                    force_platforms.append(fp_data)
+            for i in range(max(n_fp, len(python_grw))):
+                fp_type = int(types[i]) if i < len(types) else (python_grw[i]['type'] if i < len(python_grw) else 1)
+
+                # Corners
+                if corners_all is not None:
+                    corners = corners_all[:, :, i] if corners_all.ndim == 3 else corners_all
+                elif i < len(python_grw) and 'corners' in python_grw[i]:
+                    corners = python_grw[i]['corners']
+                else:
+                    corners = np.zeros((3, 4))
+
+                # Origin
+                if origins_all is not None:
+                    origin = origins_all[:, i] if origins_all.ndim == 2 else origins_all
+                elif i < len(python_grw) and 'origin' in python_grw[i]:
+                    origin = python_grw[i]['origin']
+                else:
+                    origin = np.zeros(3)
+
+                # Channel map
+                chan_map = {}
+                if channels_all is not None:
+                    ch_col = channels_all[:, i] if channels_all.ndim == 2 else channels_all
+                    for ch_idx, ch_num in enumerate(ch_col):
+                        c_num_int = int(ch_num)
+                        if 1 <= c_num_int <= len(analogs_dict):
+                            ch_lbl = list(analogs_dict.keys())[c_num_int - 1]
+                            chan_map[f"Ch_{ch_idx+1}"] = analogs_dict[ch_lbl]
+
+                # Forces, Moments, COP from Shimba algorithm
+                forces = None
+                moments = None
+                cop = None
+
+                if i < len(python_grw):
+                    grw = python_grw[i]
+                    forces = grw['F']
+                    moments = grw['M']
+                    cop = grw['P']
+
+                # Calibration Matrix
+                cal_mat = None
+                if cal_mats is not None:
+                    if cal_mats.ndim == 3 and i < cal_mats.shape[2]:
+                        cal_mat = cal_mats[:, :, i]
+                    elif cal_mats.ndim == 2:
+                        cal_mat = cal_mats
+
+                force_platforms.append(ForcePlatformData(
+                    id=i + 1,
+                    type=fp_type,
+                    corners=np.array(corners, dtype=np.float32),
+                    origin=np.array(origin, dtype=np.float32),
+                    channels=chan_map,
+                    forces=forces,
+                    moments=moments,
+                    cop=cop,
+                    cal_matrix=cal_mat
+                ))
         except Exception as e:
-            print(f"Warning parsing force platforms: {e}")
+            print(f"Warning parsing force platforms with ezc3d: {e}")
 
         # Events
         events_list: List[C3DEvent] = []
         try:
-            subj_map = {}
-            try:
-                raw_ev = btk.btkGetEvents(acq)
-                if isinstance(raw_ev, (list, tuple)) and len(raw_ev) > 1 and isinstance(raw_ev[1], dict):
-                    subj_map = raw_ev[1].get("subject", {})
-            except Exception:
-                pass
+            if 'EVENT' in c['parameters']:
+                ev_group = c['parameters']['EVENT']
+                n_events = int(ev_group.get('USED', {}).get('value', [0])[0]) if 'USED' in ev_group else 0
+                labels = ev_group.get('LABELS', {}).get('value', [])
+                contexts = ev_group.get('CONTEXTS', {}).get('value', [])
+                times_arr = ev_group.get('TIMES', {}).get('value', None)
+                descs = ev_group.get('DESCRIPTIONS', {}).get('value', [])
+                subjects = ev_group.get('SUBJECTS', {}).get('value', [])
+                icon_ids = ev_group.get('ICON_IDS', {}).get('value', [])
 
-            ev_values = btk.btkGetEventsValues(acq)
-            if isinstance(ev_values, (list, tuple)) and len(ev_values) >= 2:
-                labels = ev_values[1] if hasattr(ev_values[1], "__len__") else []
-                raw_times = np.atleast_1d(ev_values[0]) if ev_values[0] is not None else np.array([])
-                n_events = min(len(raw_times), len(labels))
-                descriptions = ev_values[2] if len(ev_values) > 2 and hasattr(ev_values[2], "__len__") else [""] * n_events
-                event_ids = ev_values[3] if len(ev_values) > 3 and hasattr(ev_values[3], "__len__") else [0] * n_events
-                
-                for i in range(n_events):
-                    t_val = float(raw_times[i])
-                    lbl_str = str(labels[i]).strip()
-                    desc_str = str(descriptions[i]).strip() if i < len(descriptions) else ""
-                    ev_id = int(event_ids[i]) if i < len(event_ids) else 0
-                    subj_str = str(subj_map.get(lbl_str, "")).strip()
-                    
-                    # Compute relative frame (clamped)
+                actual_n = min(n_events, len(labels)) if n_events > 0 else len(labels)
+                for i in range(actual_n):
+                    lbl_str = str(labels[i]).strip() if i < len(labels) else ""
+                    ctx_str = str(contexts[i]).strip() if i < len(contexts) else ""
+                    desc_str = str(descs[i]).strip() if i < len(descs) else ""
+                    subj_str = str(subjects[i]).strip() if i < len(subjects) else ""
+                    ev_id = int(icon_ids[i]) if i < len(icon_ids) else 0
+
+                    # Time calculation: in C3D/ezc3d, TIMES is a 2xN array (row 0: min, row 1: sec)
+                    t_val = 0.0
+                    if times_arr is not None:
+                        if times_arr.ndim == 2 and times_arr.shape[0] >= 2 and i < times_arr.shape[1]:
+                            t_val = float(times_arr[0, i] * 60.0 + times_arr[1, i])
+                        elif times_arr.ndim == 1 and i < len(times_arr):
+                            t_val = float(times_arr[i])
+
+                    # Calculate relative frame index (0-based)
                     frame_idx = int(round(t_val * point_rate)) if point_rate > 0 else 0
                     frame_idx = max(0, min(point_frame_count - 1, frame_idx))
-                    
-                    # Determine context (Right, Left, General)
-                    context = ""
-                    lower = lbl_str.lower()
-                    if "right" in lower or lower.startswith("r_"):
-                        context = "Right"
-                    elif "left" in lower or lower.startswith("l_"):
-                        context = "Left"
-                    else:
-                        context = "General"
 
-                    # Infer Moveck standard event ID (1=Foot Strike, 2=Foot Off, 0=General) if unassigned
+                    # Context inference
+                    if not ctx_str:
+                        lower = lbl_str.lower()
+                        if "right" in lower or lower.startswith("r_"):
+                            ctx_str = "Right"
+                        elif "left" in lower or lower.startswith("l_"):
+                            ctx_str = "Left"
+                        else:
+                            ctx_str = "General"
+
+                    # Infer standard event ID if 0
                     if ev_id == 0:
+                        lower = lbl_str.lower()
                         if "strike" in lower or "contact" in lower or "hs" in lower:
                             ev_id = 1
                         elif "off" in lower or "to" in lower:
                             ev_id = 2
 
-                    color = get_event_color(lbl_str, context)
+                    color = get_event_color(lbl_str, ctx_str)
                     events_list.append(C3DEvent(
                         name=lbl_str,
                         time=t_val,
                         frame=frame_idx,
                         subject=subj_str,
-                        context=context,
+                        context=ctx_str,
                         description=desc_str,
                         event_id=ev_id,
                         icon_color=color
                     ))
-            else:
-                # Fallback to btkGetEvents dict
-                raw_events = btk.btkGetEvents(acq)
-                if isinstance(raw_events, (list, tuple)) and len(raw_events) > 0 and isinstance(raw_events[0], dict):
-                    for lbl, t_val in raw_events[0].items():
-                        t_float = float(t_val)
-                        frame_idx = int(round(t_float * point_rate)) if point_rate > 0 else 0
-                        frame_idx = max(0, min(point_frame_count - 1, frame_idx))
-                        lbl_lower = lbl.lower()
-                        context = "Right" if "right" in lbl_lower else ("Left" if "left" in lbl_lower else "General")
-                        ev_id = 0
-                        if "strike" in lbl_lower or "contact" in lbl_lower or "hs" in lbl_lower:
-                            ev_id = 1
-                        elif "off" in lbl_lower or "to" in lbl_lower:
-                            ev_id = 2
-                        color = get_event_color(lbl, context)
-                        events_list.append(C3DEvent(
-                            name=lbl,
-                            time=t_float,
-                            frame=frame_idx,
-                            subject="",
-                            context=context,
-                            event_id=ev_id,
-                            icon_color=color
-                        ))
         except Exception as e:
-            print(f"Warning parsing events: {e}")
+            print(f"Warning parsing events with ezc3d: {e}")
 
         # Sort events chronologically
         events_list.sort(key=lambda ev: ev.time)
 
-        # Metadata
+        # Metadata tree
         metadata_tree: Dict[str, Any] = {}
         try:
-            raw_meta = btk.btkGetMetaData(acq)
-            if isinstance(raw_meta, dict):
-                metadata_tree = raw_meta
+            for g_name, grp in c['parameters'].items():
+                if not g_name:
+                    continue
+                g_dict = {'description': grp.get('description', ''), 'parameters': {}}
+                for p_name, param in grp.items():
+                    if p_name in ('description', 'is_locked'):
+                        continue
+                    if isinstance(param, dict) and 'value' in param:
+                        g_dict['parameters'][p_name] = {
+                            'values': param['value'],
+                            'description': param.get('description', '')
+                        }
+                metadata_tree[g_name] = g_dict
         except Exception as e:
-            print(f"Warning parsing metadata: {e}")
+            print(f"Warning parsing metadata with ezc3d: {e}")
 
         return C3DTrial(
             file_path=file_path,
@@ -284,5 +312,5 @@ class C3DReader:
             force_platforms=force_platforms,
             events=events_list,
             metadata=metadata_tree,
-            btk_handle=acq
+            btk_handle=c  # Stores ezc3d object reference for saving/exporting
         )
