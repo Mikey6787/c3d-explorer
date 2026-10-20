@@ -517,25 +517,12 @@ class MainWindow(QMainWindow):
         act_coffee.triggered.connect(self.open_donate_url)
         donate_menu.addAction(act_coffee)
 
-        act_donate_paypal = QAction("Support via PayPal...", self)
-        act_donate_paypal.setStatusTip("Support C3D Explorer development (mohamadreza.kharazi@live.com)")
-        act_donate_paypal.triggered.connect(self.open_donate_url)
-        donate_menu.addAction(act_donate_paypal)
-
-        # ---------------- HELP MENU ----------------
-        help_menu = menubar.addMenu("&Help")
-
-        act_donate_help = QAction("☕ Buy Me a Coffee (€5)...", self)
-        act_donate_help.setStatusTip("Support C3D Explorer development via PayPal (€5.00)")
-        act_donate_help.triggered.connect(self.open_donate_url)
-        help_menu.addAction(act_donate_help)
-
-        help_menu.addSeparator()
-
+        # On macOS, wire About action to the Application menu
         act_about = QAction("About C3D explorer", self)
         act_about.setMenuRole(QAction.AboutRole)
         act_about.triggered.connect(self.show_about_dialog)
-        help_menu.addAction(act_about)
+        if sys.platform == "darwin":
+            menubar.addAction(act_about)
 
         # For platforms with in-window menubar (Windows/Linux), also add a styled corner button
         if not menubar.isNativeMenuBar():
