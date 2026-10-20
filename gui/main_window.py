@@ -509,13 +509,57 @@ class MainWindow(QMainWindow):
         act_color_marker.triggered.connect(self.side_panel._action_change_marker_color)
         marker_menu.addAction(act_color_marker)
 
+        # ---------------- DONATE MENU ----------------
+        donate_menu = menubar.addMenu("☕ &Donate")
+
+        act_coffee = QAction("☕ Buy Me a Coffee (€5)...", self)
+        act_coffee.setStatusTip("Support C3D Explorer development via PayPal (€5.00)")
+        act_coffee.triggered.connect(self.open_donate_url)
+        donate_menu.addAction(act_coffee)
+
+        act_donate_paypal = QAction("Support via PayPal...", self)
+        act_donate_paypal.setStatusTip("Support C3D Explorer development (mohamadreza.kharazi@live.com)")
+        act_donate_paypal.triggered.connect(self.open_donate_url)
+        donate_menu.addAction(act_donate_paypal)
+
         # ---------------- HELP MENU ----------------
         help_menu = menubar.addMenu("&Help")
+
+        act_donate_help = QAction("☕ Buy Me a Coffee (€5)...", self)
+        act_donate_help.setStatusTip("Support C3D Explorer development via PayPal (€5.00)")
+        act_donate_help.triggered.connect(self.open_donate_url)
+        help_menu.addAction(act_donate_help)
+
+        help_menu.addSeparator()
 
         act_about = QAction("About C3D explorer", self)
         act_about.setMenuRole(QAction.AboutRole)
         act_about.triggered.connect(self.show_about_dialog)
         help_menu.addAction(act_about)
+
+        # For platforms with in-window menubar (Windows/Linux), also add a styled corner button
+        if not menubar.isNativeMenuBar():
+            btn_corner_donate = QPushButton("☕ Buy Me a Coffee")
+            btn_corner_donate.setToolTip("Support C3D Explorer development via PayPal (€5.00)")
+            btn_corner_donate.setCursor(Qt.PointingHandCursor)
+            btn_corner_donate.setStyleSheet("""
+                QPushButton {
+                    background-color: #6F4220;
+                    color: #FFFFFF;
+                    font-weight: 600;
+                    font-size: 11px;
+                    border-radius: 4px;
+                    padding: 3px 10px;
+                    margin: 2px 6px;
+                    border: 1px solid #8D5B36;
+                }
+                QPushButton:hover {
+                    background-color: #8D5B36;
+                    border: 1px solid #A46D43;
+                }
+            """)
+            btn_corner_donate.clicked.connect(self.open_donate_url)
+            menubar.setCornerWidget(btn_corner_donate, Qt.TopRightCorner)
 
         # On macOS, customize and clean the application menu & Edit menu directly in Cocoa
         if sys.platform == "darwin":
@@ -1500,6 +1544,17 @@ class MainWindow(QMainWindow):
                     self._apply_settings(saved_cfg, save_to_disk=False)
         except Exception as e:
             print(f"Warning: Failed to load saved user settings: {e}")
+
+    def open_donate_url(self):
+        """Open PayPal Buy Me a Coffee donation link (€5)."""
+        url = (
+            "https://www.paypal.com/cgi-bin/webscr?cmd=_donations"
+            "&business=mohamadreza.kharazi%40live.com"
+            "&currency_code=EUR"
+            "&amount=5.00"
+            "&item_name=Buy+Me+a+Coffee+-+C3D+Explorer"
+        )
+        QDesktopServices.openUrl(QUrl(url))
 
     def show_about_dialog(self):
         dlg = AboutDialog(self)
