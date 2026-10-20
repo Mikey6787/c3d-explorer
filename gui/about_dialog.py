@@ -48,10 +48,10 @@ class AboutDialog(QDialog):
         header.addStretch()
         layout.addLayout(header)
 
-        # 2. Author Info
+        # 2. Developer Info
         author_box = QVBoxLayout()
         author_box.setSpacing(3)
-        lbl_author = QLabel("Author: <b>Dr. Mohamadreza Kharazi</b>")
+        lbl_author = QLabel("Developer: <b>Dr. Mohamadreza Kharazi</b>")
         lbl_author.setStyleSheet("font-size: 14px; color: #FFFFFF;")
         lbl_inst = QLabel("Universität Koblenz, Germany")
         lbl_inst.setStyleSheet("font-size: 12px; color: #8F9BB3;")
