@@ -3,7 +3,8 @@
 import os
 import struct
 import copy
-from typing import List, Optional
+import re
+from typing import List, Optional, Dict, Any
 import numpy as np
 
 try:
@@ -12,11 +13,100 @@ try:
 except ImportError:
     EZC3D_AVAILABLE = False
 
-from core.data_models import C3DTrial
+from core.data_models import C3DTrial, deduplicate_events
+
+
+def make_c3d_4char_label(name: str, context: str = "") -> str:
+    """
+    Generate a clean, standard 4-character C3D event label for header storage (Words 199-234).
+    Uses standard biomechanics gait abbreviations (e.g. RHS, LTO, RFS, LFO)
+    or cleanly formats arbitrary event labels into 4 characters.
+    """
+    clean_name = (name or "").strip()
+    norm = clean_name.lower()
+    norm_ctx = (context or "").strip().lower()
+
+    # Determine context prefix ('R' or 'L')
+    prefix = ""
+    if "right" in norm_ctx or norm.startswith("r_") or norm.startswith("r ") or norm.startswith("right"):
+        prefix = "R"
+    elif "left" in norm_ctx or norm.startswith("l_") or norm.startswith("l ") or norm.startswith("left"):
+        prefix = "L"
+
+    tokens = set(re.split(r"[\s_\-]+", norm))
+    is_strike = ("heel" in norm or "strike" in norm or "contact" in norm or
+                 any(t in tokens for t in ("hs", "fs")))
+    is_off = ("toe" in norm or "off" in norm or
+              any(t in tokens for t in ("to", "fo")))
+
+    if is_strike:
+        return f"{prefix}HS " if prefix else "FS  "
+    elif is_off:
+        return f"{prefix}TO " if prefix else "FO  "
+    elif "start" in tokens or "start" in norm:
+        return "STRT"
+    elif "stop" in tokens or "end" in tokens or "stop" in norm:
+        return "STOP"
+
+    # Strip context prefix if already present in name
+    if prefix and (clean_name.upper().startswith(f"{prefix}_") or clean_name.upper().startswith(f"{prefix} ")):
+        clean_name = clean_name[2:].strip()
+
+    if len(clean_name) <= 4:
+        return clean_name.ljust(4)
+
+    if prefix:
+        short = clean_name.replace(" ", "").replace("_", "")
+        return f"{prefix}{short[:3]}".ljust(4)
+
+    condensed = clean_name.replace(" ", "").replace("_", "")
+    return (condensed[:4] if len(condensed) >= 4 else clean_name[:4]).ljust(4)
 
 
 class C3DWriter:
     """Handles saving C3D trials and exporting to CSV and STL formats using ezc3d."""
+
+    @classmethod
+    def _sync_header_events(cls, file_path: str) -> None:
+        """
+        Ensure the C3D Header event table (Words 150-234, bytes 298-468) has Word 151 = 0.
+        According to the C3D specification, when the modern EVENT parameter group is populated,
+        Header Word 151 must be 0. This prevents dual-interpreting readers (such as BTK and Mokka)
+        from instantiating duplicate 4-character abbreviation events in the 'General' context.
+        """
+        if not os.path.isfile(file_path):
+            return
+
+        try:
+            with open(file_path, "r+b") as fp:
+                # Seek to Word 150 (byte offset 298)
+                fp.seek(298)
+
+                # Word 150: Key value 12345 (0x3039) indicates support for 4-character event labels
+                fp.write(struct.pack("<H", 12345))
+
+                # Word 151: Set to 0 to prevent dual-interpreting readers (BTK/Mokka) from creating duplicate General-context events
+                fp.write(struct.pack("<H", 0))
+
+                # Word 152: Reserved (0)
+                fp.write(struct.pack("<H", 0))
+
+                # Words 153-188: 18 event times as 32-bit float (0.0)
+                for _ in range(18):
+                    fp.write(struct.pack("<f", 0.0))
+
+                # Words 189-197: 18 event display flags (1 byte each, 0x00 = ON)
+                for _ in range(18):
+                    fp.write(b"\x00")
+
+                # Word 198: Reserved (0)
+                fp.write(struct.pack("<H", 0))
+
+                # Words 199-234: 18 event labels (4 spaces each)
+                for _ in range(18):
+                    fp.write(b"    ")
+        except Exception as e:
+            print(f"Warning synchronizing C3D header events: {e}")
 
     @classmethod
     def save_c3d(
@@ -86,12 +176,7 @@ class C3DWriter:
         analog_end = (end_frame + 1) * sub
         trim_analog_frames = trim_frames * sub
 
-        if 'analogs' in c['data'] and c['data']['analogs'].ndim >= 3 and c['data']['analogs'].shape[2] > 0:
-            orig_analog_frames = c['data']['analogs'].shape[2]
-            actual_end = min(orig_analog_frames, analog_end)
-            actual_start = min(orig_analog_frames, analog_start)
-            c['data']['analogs'] = c['data']['analogs'][:, :, actual_start:actual_end]
-        elif trial.analogs:
+        if trial.analogs:
             a_names = list(trial.analogs.keys())
             num_analogs = len(a_names)
             new_analogs = np.zeros((1, num_analogs, trim_analog_frames), dtype=np.float64)
@@ -100,14 +185,47 @@ class C3DWriter:
                 sliced_a = a_data[analog_start:min(len(a_data), analog_end)]
                 new_analogs[0, idx, :len(sliced_a)] = sliced_a
             c['data']['analogs'] = new_analogs
-            c['parameters']['ANALOG']['LABELS']['value'] = a_names
-            c['parameters']['ANALOG']['USED']['value'] = [num_analogs]
+            if 'ANALOG' in c['parameters']:
+                if 'LABELS' in c['parameters']['ANALOG']:
+                    c['parameters']['ANALOG']['LABELS']['value'] = a_names
+                if 'USED' in c['parameters']['ANALOG']:
+                    c['parameters']['ANALOG']['USED']['value'] = [num_analogs]
+        elif 'analogs' in c['data'] and c['data']['analogs'].ndim >= 3 and c['data']['analogs'].shape[2] > 0:
+            orig_analog_frames = c['data']['analogs'].shape[2]
+            actual_end = min(orig_analog_frames, analog_end)
+            actual_start = min(orig_analog_frames, analog_start)
+            c['data']['analogs'] = c['data']['analogs'][:, :, actual_start:actual_end]
 
         # 3. Synchronize Frame Range in Header
         orig_first = trial.first_frame
-        c['header']['points']['first_frame'] = int(orig_first + start_frame)
-        c['header']['points']['last_frame'] = int(orig_first + end_frame)
+        new_first_frame = int(orig_first + start_frame)
+        new_last_frame = int(orig_first + end_frame)
+
+        c['header']['points']['first_frame'] = new_first_frame
+        c['header']['points']['last_frame'] = new_last_frame
         c['header']['points']['frame_rate'] = float(trial.point_rate)
+
+        # Synchronize TRIAL group if present (read by BTK / Mokka to set first and last frames)
+        if 'TRIAL' in c['parameters']:
+            if 'ACTUAL_START_FIELD' in c['parameters']['TRIAL']:
+                hsb = new_first_frame >> 16
+                lsb = new_first_frame & 0xFFFF
+                c['parameters']['TRIAL']['ACTUAL_START_FIELD']['value'] = [lsb, hsb]
+            if 'ACTUAL_END_FIELD' in c['parameters']['TRIAL']:
+                hsb = new_last_frame >> 16
+                lsb = new_last_frame & 0xFFFF
+                c['parameters']['TRIAL']['ACTUAL_END_FIELD']['value'] = [lsb, hsb]
+
+        if 'POINT' in c['parameters']:
+            c['parameters']['POINT']['FRAMES']['value'] = [trim_frames]
+            if 'LONG_FRAMES' in c['parameters']['POINT']:
+                c['parameters']['POINT']['LONG_FRAMES']['value'] = [float(trim_frames)]
+
+        if 'PROCESSING' in c['parameters']:
+            if 'Cropped Measurement Start Frame' in c['parameters']['PROCESSING']:
+                c['parameters']['PROCESSING']['Cropped Measurement Start Frame']['value'] = [float(new_first_frame)]
+            if 'Cropped Measurement End Frame' in c['parameters']['PROCESSING']:
+                c['parameters']['PROCESSING']['Cropped Measurement End Frame']['value'] = [float(new_last_frame)]
 
         # 4. Synchronize Force Platform parameters if created from scratch
         if 'FORCE_PLATFORM' not in c['parameters'] and trial.force_platforms:
@@ -127,35 +245,59 @@ class C3DWriter:
         if 'EVENT' in c['parameters']:
             del c['parameters']['EVENT']
 
-        for ev in trial.events:
-            if start_frame <= ev.frame <= end_frame:
-                rel_frame = ev.frame - start_frame
-                rel_time = rel_frame / trial.point_rate if trial.point_rate > 0 else 0.0
+        # Remove duplicate events (e.g. redundant abbreviations or duplicate entries)
+        trial.events = deduplicate_events(trial.events, trial.point_rate)
 
-                ctx = ev.context if ev.context else "General"
-                lbl = ev.name
+        for ev in trial.events:
+            ev_frame = ev.frame if (ev.frame is not None and ev.frame >= 0) else int(round(ev.time * trial.point_rate))
+            if start_frame <= ev_frame <= end_frame:
+                rel_frame = ev_frame - start_frame
+
+                # In C3D format (BTK, Mokka, Vicon Nexus):
+                # An event's frame on the timeline ruler is: ruler_frame = new_first_frame + rel_frame
+                # BTK / Mokka reconstructs the event frame as: frame = floor(time * point_rate + 1.5)
+                # Therefore, time in C3D must be: time = (ruler_frame - 1) / point_rate
+                # When new_first_frame > 1 (e.g. 1856, or 21 when 1-based trimmed):
+                # c3d_event_time = (new_first_frame + rel_frame - 1) / point_rate
+                # When new_first_frame <= 1 (e.g. 0-based indexing):
+                # c3d_event_time = rel_frame / point_rate
+                if new_first_frame > 1:
+                    c3d_event_time = float(new_first_frame + rel_frame - 1) / trial.point_rate if trial.point_rate > 0 else 0.0
+                else:
+                    c3d_event_time = float(rel_frame) / trial.point_rate if trial.point_rate > 0 else 0.0
+
+                ctx = ev.context.strip() if ev.context else "General"
+                lbl = (ev.name or "").strip()
+                if not lbl:
+                    lbl = "Event"
+
+                # Normalize label if redundant with context (e.g. "Left Foot Off" in "Left" context -> "Foot Off")
                 if lbl.lower().startswith(ctx.lower()):
                     lbl_clean = lbl[len(ctx):].lstrip(" _-")
                     if lbl_clean:
                         lbl = lbl_clean
 
-                desc = getattr(ev, "description", "") or ""
-                subj = getattr(ev, "subject", "") or ""
+                # Non-empty description and subject to prevent ezc3d dimension collapsing
+                desc = getattr(ev, "description", "") or " "
+                subj = getattr(ev, "subject", "") or " "
                 ev_id = getattr(ev, "event_id", 0) or 0
 
-                minutes = int(rel_time // 60)
-                seconds = float(rel_time % 60)
+                minutes = int(c3d_event_time // 60)
+                seconds = float(c3d_event_time % 60)
                 c.add_event(
                     time=[minutes, seconds],
                     context=ctx,
                     label=lbl,
                     description=desc,
                     subject=subj,
-                    icon_id=ev_id
+                    icon_id=int(ev_id)
                 )
 
         # Write out C3D
         c.write(output_path)
+
+        # 6. Ensure Header Word 151 = 0 to prevent external readers (Mokka, BTK) from generating duplicate General-context events
+        cls._sync_header_events(output_path)
 
     @classmethod
     def export_markers_csv(

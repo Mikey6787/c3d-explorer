@@ -407,3 +407,53 @@ class ChangeMarkerColorCommand(QUndoCommand):
             self.mw.status.showMessage(msg, 2500)
         finally:
             self.mw._is_undo_redo_running = False
+
+
+class FilterMarkersCommand(QUndoCommand):
+    """Command to apply a Butterworth low-pass filter to all marker trajectories."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        order: int,
+        cutoff: float,
+        old_markers: Dict[str, np.ndarray],
+        new_markers: Dict[str, np.ndarray]
+    ):
+        super().__init__(f"Filter Markers (Order {order}, {cutoff:.1f} Hz)")
+        self.mw = main_window
+        self.trial = trial
+        self.order = order
+        self.cutoff = cutoff
+        self.old_markers = {k: v.copy() for k, v in old_markers.items()}
+        self.new_markers = {k: v.copy() for k, v in new_markers.items()}
+
+    def redo(self):
+        if not self.trial:
+            return
+        for name, arr in self.new_markers.items():
+            self.trial.markers[name] = arr.copy()
+        self._refresh()
+        self.mw.status.showMessage(
+            f"Filtered {len(self.new_markers)} markers (Butterworth Order {self.order}, {self.cutoff:.1f} Hz)",
+            3500
+        )
+
+    def undo(self):
+        if not self.trial:
+            return
+        for name, arr in self.old_markers.items():
+            self.trial.markers[name] = arr.copy()
+        self._refresh()
+        self.mw.status.showMessage(
+            "Undid marker filter, restored original trajectories",
+            3500
+        )
+
+    def _refresh(self):
+        if hasattr(self.mw, 'viewer_3d') and self.mw.viewer_3d:
+            self.mw.viewer_3d.set_frame(self.mw.playback.current_frame)
+        if hasattr(self.mw, 'plotter_widget') and self.mw.plotter_widget:
+            self.mw.plotter_widget.load_trial(self.trial)
+

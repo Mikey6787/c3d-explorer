@@ -25,20 +25,21 @@ import pyqtgraph as pg
 from gui.viewer_3d import Viewer3D
 from gui.timeline_widget import TimelineWidget
 from gui.playback_controller import PlaybackController
-from gui.plot_panel import PlotPanel
 from gui.side_panel import SidePanel
 from gui.settings_dialog import SettingsDialog
 from gui.marker_tools_dialog import (
-    CreateAverageMarkerDialog, MeasureDistanceDialog, MeasureAngleDialog, AddMarkerDialog
+    CreateAverageMarkerDialog, MeasureDistanceDialog, MeasureAngleDialog, AddMarkerDialog,
+    FilterMarkersDialog, filter_marker_array
 )
-from gui.plotter_window import UniversalPlotterWindow
-from gui.measurement_plot_window import MeasurementPlotWindow
+from gui.plotter_window import UniversalPlotter, UniversalPlotterWindow
 from gui.event_dialog import EventEditDialog, EventManagerDialog
+from gui.analog_dialog import AnalogToolsDialog
 from gui.about_dialog import AboutDialog
 from gui.undo_commands import (
     AddEventCommand, DeleteEventCommand, DeleteEventsCommand, EditEventCommand,
     ClearEventsCommand, EventsBatchCommand, RenameMarkerCommand,
-    AddMarkerCommand, DeleteMarkerCommand, DeleteMarkersCommand, ChangeMarkerColorCommand
+    AddMarkerCommand, DeleteMarkerCommand, DeleteMarkersCommand, ChangeMarkerColorCommand,
+    FilterMarkersCommand
 )
 
 
@@ -65,8 +66,10 @@ class MainWindow(QMainWindow):
 
         self.dist_dialog: Optional[MeasureDistanceDialog] = None
         self.angle_dialog: Optional[MeasureAngleDialog] = None
-        self.plotter_window: Optional[UniversalPlotterWindow] = None
-        self.measurement_plot_windows: List[MeasurementPlotWindow] = []
+        self.analog_dialog: Optional[AnalogToolsDialog] = None
+        self.plotter_widget = UniversalPlotter(parent=self)
+        self.plotter_window = self.plotter_widget  # Maintain reference for compatibility
+        self.plot_panel = self.plotter_widget      # Alias for backwards compatibility
         self.current_theme_name: str = DEFAULT_THEME_NAME
 
         # Playback Controller
@@ -77,7 +80,6 @@ class MainWindow(QMainWindow):
         # Core Components
         self.viewer_3d = Viewer3D(self)
         self.timeline = TimelineWidget(self)
-        self.plot_panel = PlotPanel(self)
         self.side_panel = SidePanel(self)
 
         self._setup_layout()
@@ -118,16 +120,18 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.LeftDockWidgetArea, self.dock_side)
 
-        # --- Bottom Dock: Analog Panel ---
-        self.dock_plot = QDockWidget("Analog", self)
-        self.dock_plot.setObjectName("DockAnalog")
-        self.dock_plot.setWidget(self.plot_panel)
-        self.dock_plot.setFeatures(
+        # --- Bottom Dock: Universal Plotter Panel ---
+        self.dock_plotter = QDockWidget("Plotter", self)
+        self.dock_plotter.setObjectName("DockPlotter")
+        self.plotter_widget.set_dock_widget(self.dock_plotter)
+        self.dock_plotter.setWidget(self.plotter_widget)
+        self.dock_plotter.setFeatures(
             QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable | QDockWidget.DockWidgetClosable
         )
-        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_plot)
-        self.dock_plot.visibilityChanged.connect(self._on_analog_dock_visibility_changed)
-        self.dock_plot.hide()  # By default, Analog panel is deactivated/hidden on launch
+        self.addDockWidget(Qt.BottomDockWidgetArea, self.dock_plotter)
+        self.dock_plot = self.dock_plotter  # Alias for backward compatibility
+        self.dock_plotter.visibilityChanged.connect(self._on_plotter_dock_visibility_changed)
+        self.dock_plotter.hide()  # By default, Plotter panel is deactivated/hidden on launch
 
     def _setup_playback_bar(self):
         """Build the playback toolbar positioned above the timeline."""
@@ -285,7 +289,7 @@ class MainWindow(QMainWindow):
         export_menu = file_menu.addMenu("Export")
 
         act_exp_c3d = QAction("Export C3D...", self)
-        act_exp_c3d.triggered.connect(self.save_as_file)
+        act_exp_c3d.triggered.connect(self.export_c3d_dialog)
         export_menu.addAction(act_exp_c3d)
 
         act_exp_stl = QAction("Export 3D Geometry as STL...", self)
@@ -416,8 +420,8 @@ class MainWindow(QMainWindow):
         act_toggle_side.setText("Data Explorer")
         panels_menu.addAction(act_toggle_side)
 
-        act_toggle_plot = self.dock_plot.toggleViewAction()
-        act_toggle_plot.setText("Analog")
+        act_toggle_plot = self.dock_plotter.toggleViewAction()
+        act_toggle_plot.setText("Plotter")
         panels_menu.addAction(act_toggle_plot)
 
         # Theme Submenu (Direct Theme Switching)
@@ -442,6 +446,11 @@ class MainWindow(QMainWindow):
         act_plotter.setStatusTip("Open Universal Plotter to plot markers, force plates, and analog channels")
         act_plotter.triggered.connect(self.open_plotter_window)
         tools_menu.addAction(act_plotter)
+
+        act_analog = QAction("&Analog...", self)
+        act_analog.setStatusTip("Manage and filter analog channels (rename, delete, import, Butterworth/RMS filters)")
+        act_analog.triggered.connect(self.open_analog_tools_dialog)
+        tools_menu.addAction(act_analog)
 
         # Events Submenu
         event_menu = tools_menu.addMenu("&Events")
@@ -484,6 +493,11 @@ class MainWindow(QMainWindow):
         act_meas_angle = QAction("Measure &Angle Between 3 Markers...", self)
         act_meas_angle.triggered.connect(self.open_measure_angle_dialog)
         marker_menu.addAction(act_meas_angle)
+
+        act_filter_markers = QAction("&Filter...", self)
+        act_filter_markers.setStatusTip("Apply Butterworth low-pass filter to all marker trajectories")
+        act_filter_markers.triggered.connect(self.open_filter_markers_dialog)
+        marker_menu.addAction(act_filter_markers)
 
         marker_menu.addSeparator()
 
@@ -530,8 +544,8 @@ class MainWindow(QMainWindow):
         self.timeline.deleteEventRequested.connect(self.delete_event)
         self.timeline.displayModeChanged.connect(self._on_timeline_mode_changed)
 
-        # 2D Plot time cursor dragged -> Playback frame
-        self.plot_panel.timeCursorMoved.connect(self._on_plot_cursor_moved)
+        # Plotter time cursor dragged -> Playback frame
+        self.plotter_widget.timeCursorMoved.connect(self._on_plot_cursor_moved)
 
         # Side panel interactions
         self.side_panel.markerVisibilityChanged.connect(self.viewer_3d.toggle_marker_visibility)
@@ -552,8 +566,7 @@ class MainWindow(QMainWindow):
 
         # Timeline Trim / Cut range synchronization
         self.timeline.trimRangeChanged.connect(self._on_trim_range_changed)
-        if hasattr(self, 'plot_panel'):
-            self.plot_panel.trimRangeChanged.connect(self._on_plot_roi_changed)
+        self.plotter_widget.trimRangeChanged.connect(self._on_plot_roi_changed)
 
         # 3D Viewer interactive picking -> Side panel synchronization
         self.viewer_3d.markersSelected.connect(self._on_3d_markers_selected)
@@ -576,23 +589,19 @@ class MainWindow(QMainWindow):
         if self.angle_dialog and self.angle_dialog.isVisible():
             self.angle_dialog.set_trim_range(start_f, end_f)
 
-        # Synchronize all active measurement plot windows
-        for win in self.measurement_plot_windows:
-            if win.isVisible():
-                win.set_trim_range(start_f, end_f)
+        # Synchronize Universal Plotter
+        if self.plotter_widget:
+            self.plotter_widget.set_trim_range(start_f, end_f)
 
-        # Synchronize 2D PlotPanel
-        if hasattr(self, 'plot_panel'):
-            self.plot_panel.set_trim_range(start_f, end_f)
+    def _on_plotter_dock_visibility_changed(self, visible: bool):
+        if visible and self.trial:
+            if hasattr(self, 'timeline'):
+                self.plotter_widget.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
+            if hasattr(self, 'playback'):
+                self.plotter_widget.update_frame(self.playback.current_frame)
 
-        # Synchronize UniversalPlotterWindow
-        if self.plotter_window:
-            self.plotter_window.set_trim_range(start_f, end_f)
-
-    def _on_analog_dock_visibility_changed(self, visible: bool):
-        if visible and hasattr(self, 'plot_panel') and self.trial:
-            self.plot_panel.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
-            self.plot_panel.set_frame(self.playback.current_frame)
+    # Alias for backward compatibility
+    _on_analog_dock_visibility_changed = _on_plotter_dock_visibility_changed
 
     def _on_plot_roi_changed(self, start_f: int, end_f: int):
         """Synchronize timeline trim when ROI is dragged on a plot window or panel."""
@@ -607,32 +616,24 @@ class MainWindow(QMainWindow):
         if not self.trial:
             return
 
+        cur_time = self.trial.frame_to_time(frame_idx)
+
         # 1. Update 3D Viewport
         self.viewer_3d.set_frame(frame_idx)
 
         # 2. Update Timeline Slider
         self.timeline.set_current_frame(frame_idx)
 
-        # 3. Update 2D Plot Time Cursor
-        cur_time = self.trial.frame_to_time(frame_idx)
-        if hasattr(self, 'plot_panel'):
-            self.plot_panel.set_time(cur_time)
-
-        # 4. Update Side Panel Live Readouts
+        # 3. Update Side Panel Live Readouts
         self.side_panel.update_live_values(frame_idx)
 
-        # 5. Update Active Measurement Dialogs & Plotter
+        # 4. Update Active Measurement Dialogs & Plotter
         if self.dist_dialog and self.dist_dialog.isVisible():
             self.dist_dialog.update_frame(frame_idx)
         if self.angle_dialog and self.angle_dialog.isVisible():
             self.angle_dialog.update_frame(frame_idx)
-        if self.plotter_window and (self.plotter_window.isVisible() or not self.plotter_window.isHidden()):
-            self.plotter_window.update_frame(frame_idx)
-        for m_win in list(self.measurement_plot_windows):
-            if m_win.isVisible():
-                m_win.update_frame(frame_idx)
-            else:
-                self.measurement_plot_windows.remove(m_win)
+        if self.plotter_widget and (self.plotter_widget.isVisible() or self.dock_plotter.isVisible()):
+            self.plotter_widget.update_frame(frame_idx)
 
         # 6. Update Playback Toolbar Labels
         self.lbl_frame_info.setText(f"Frame: {frame_idx + 1} / {self.trial.point_frame_count}")
@@ -745,6 +746,31 @@ class MainWindow(QMainWindow):
         cmd = AddMarkerCommand(self, self.trial, name, data, rgba)
         self.undo_stack.push(cmd)
 
+    def open_filter_markers_dialog(self):
+        """Open dialog to configure Butterworth low-pass filter parameters for all markers."""
+        if not self.trial or not self.trial.markers:
+            if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+                QMessageBox.information(self, "Filter Markers", "Please load a C3D trial with markers first.")
+            return
+
+        dlg = FilterMarkersDialog(self.trial, parent=self)
+        if dlg.exec() == QDialog.Accepted:
+            order = dlg.spin_order.value()
+            cutoff = dlg.spin_cutoff.value()
+            self.filter_all_markers(order, cutoff)
+
+    def filter_all_markers(self, order: int, cutoff: float):
+        """Filter all marker trajectories with the given order and cutoff frequency."""
+        if not self.trial or not self.trial.markers:
+            return
+
+        fs = float(self.trial.point_rate) if self.trial.point_rate > 0 else 100.0
+        old_markers = {name: arr.copy() for name, arr in self.trial.markers.items()}
+        new_markers = {name: filter_marker_array(arr, fs, order, cutoff) for name, arr in self.trial.markers.items()}
+
+        cmd = FilterMarkersCommand(self, self.trial, order, cutoff, old_markers, new_markers)
+        self.undo_stack.push(cmd)
+
     def open_average_marker_dialog(self):
         if not self.trial or not self.trial.markers:
             QMessageBox.information(self, "Marker Tool", "Please load a C3D trial first.")
@@ -773,8 +799,7 @@ class MainWindow(QMainWindow):
             preselected=selected, trim_range=trim_rng, parent=self
         )
         self.dist_dialog.visualize3DRequested.connect(self.viewer_3d.set_distance_measurement)
-        self.dist_dialog.plotRequested.connect(self.plot_panel.add_custom_curve)
-        self.dist_dialog.openPlotWindowRequested.connect(self.show_measurement_plot)
+        self.dist_dialog.plotRequested.connect(self._on_plot_custom_curve_requested)
         self.dist_dialog.show()
 
     def open_measure_angle_dialog(self):
@@ -790,8 +815,7 @@ class MainWindow(QMainWindow):
             preselected=selected, trim_range=trim_rng, parent=self
         )
         self.angle_dialog.visualize3DRequested.connect(self.viewer_3d.set_angle_measurement)
-        self.angle_dialog.plotRequested.connect(self.plot_panel.add_custom_curve)
-        self.angle_dialog.openPlotWindowRequested.connect(self.show_measurement_plot)
+        self.angle_dialog.plotRequested.connect(self._on_plot_custom_curve_requested)
         self.angle_dialog.show()
 
     def show_measurement_plot(
@@ -802,84 +826,75 @@ class MainWindow(QMainWindow):
         curve_type: str = "Distance",
         trim_range: Optional[Tuple[int, int]] = None
     ):
-        """Instantly pop up a dedicated high-resolution curve plot window with ROI highlighting."""
-        cur_f = self.playback.current_frame if self.trial else 0
-        point_rate = self.trial.point_rate if self.trial else 100.0
-        if trim_range is None and hasattr(self, 'timeline'):
-            trim_range = (self.timeline.trim_start_frame, self.timeline.trim_end_frame)
-
-        win = MeasurementPlotWindow(
-            title=title,
-            y_data=y_data,
-            point_rate=point_rate,
-            unit=unit,
-            curve_type=curve_type,
-            current_frame=cur_f,
-            trim_range=trim_range,
-            parent=None
-        )
-        win.timeCursorMoved.connect(self._on_plot_cursor_moved)
-        win.trimRangeChanged.connect(self._on_plot_roi_changed)
-        win.windowClosed.connect(lambda: self._on_measurement_window_closed(win))
-        theme_dict = get_theme(self.current_theme_name)
-        if hasattr(win, "plot_widget"):
-            win.plot_widget.setBackground(theme_dict.get("plot_bg", "#151720"))
-        win.show()
-        win.raise_()
-        win.activateWindow()
-        self.measurement_plot_windows.append(win)
-        self.status.showMessage(f"Opened plot window for {title}", 3000)
-
-    def _on_measurement_window_closed(self, win):
-        if win in self.measurement_plot_windows:
-            self.measurement_plot_windows.remove(win)
-        has_other_dist = any(
-            isinstance(w, MeasurementPlotWindow) and w.curve_type == "Distance" and w.isVisible()
-            for w in self.measurement_plot_windows
-        )
-        if not has_other_dist and hasattr(self, 'viewer_3d'):
-            self.viewer_3d.set_distance_measurement("", "", False)
+        """Plot measurement curve directly into Universal Plotter without a separate pop-up window."""
+        self.open_plotter_window()
+        self.plotter_widget.add_custom_curve(title, y_data, unit=unit)
+        self.status.showMessage(f"Plotted {title} in Universal Plotter", 3000)
 
     def open_plotter_window(self):
-        """Open or bring to focus the Universal Plotter Window."""
-        if self.plotter_window is None:
-            cur_f = self.playback.current_frame if self.trial else 0
-            self.plotter_window = UniversalPlotterWindow(self.trial, current_frame=cur_f, parent=None)
-            self.plotter_window.timeCursorMoved.connect(self._on_plot_cursor_moved)
-            self.plotter_window.trimRangeChanged.connect(self._on_plot_roi_changed)
-            if hasattr(self, 'current_theme_name'):
-                self.plotter_window.apply_theme(get_theme(self.current_theme_name))
-        else:
-            if self.trial and self.plotter_window.trial != self.trial:
-                self.plotter_window.load_trial(self.trial)
-            elif self.trial:
-                self.plotter_window.reload_events()
+        """Open or bring to focus the Universal Plotter panel (docked or floating)."""
+        if self.trial and self.plotter_widget.trial != self.trial:
+            self.plotter_widget.load_trial(self.trial)
+        elif self.trial:
+            self.plotter_widget.reload_events()
         if hasattr(self, 'timeline'):
-            self.plotter_window.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
-        self.plotter_window.show()
-        self.plotter_window.raise_()
-        self.plotter_window.activateWindow()
+            self.plotter_widget.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
+        self.dock_plotter.show()
+        self.dock_plotter.raise_()
+        if self.dock_plotter.isFloating():
+            self.dock_plotter.activateWindow()
         if self.trial:
-            self.plotter_window.update_frame(self.playback.current_frame)
+            self.plotter_widget.update_frame(self.playback.current_frame)
+
+    def open_analog_tools_dialog(self):
+        """Open the Analog Channels Manager & Signal Processing dialog."""
+        if not self.trial:
+            QMessageBox.information(self, "Analog Tools", "Please load a C3D trial first.")
+            return
+
+        self.analog_dialog = AnalogToolsDialog(self.trial, parent=self)
+        self.analog_dialog.analogsChanged.connect(self._on_analogs_changed)
+        self.analog_dialog.plotChannelRequested.connect(self._on_plot_analog_channel_requested)
+        self.analog_dialog.plotChannelsRequested.connect(self._on_plot_analog_channels_requested)
+        self.analog_dialog.show()
+        self.analog_dialog.raise_()
+        self.analog_dialog.activateWindow()
+
+    def _on_plot_analog_channel_requested(self, ch_name: str):
+        """Activate the analog channel under Analog Channels in Universal Plotter and plot it."""
+        self._on_plot_analog_channels_requested([ch_name])
+
+    def _on_plot_analog_channels_requested(self, ch_names: List[str]):
+        """Activate multiple analog channels under Analog Channels in Universal Plotter and plot them."""
+        self.open_plotter_window()
+        self.plotter_widget.plot_analog_channels(ch_names)
+        if len(ch_names) == 1:
+            self.status.showMessage(f"Plotted analog channel '{ch_names[0]}' in Universal Plotter", 3000)
+        else:
+            self.status.showMessage(f"Plotted {len(ch_names)} analog channels in Universal Plotter", 3000)
+
+    def _on_analogs_changed(self):
+        """Called when analog channels are modified (renamed, deleted, added, filtered)."""
+        if self.trial and hasattr(self, 'plotter_widget'):
+            self.plotter_widget.load_trial(self.trial)
+        self._update_status_stats()
+
+    def _on_plot_custom_curve_requested(self, label: str, y_data: np.ndarray):
+        """Slot for custom curve plot requests (e.g. from distance or angle dialogs)."""
+        self.open_plotter_window()
+        self.plotter_widget.add_custom_curve(label, y_data)
 
     def plot_marker(self, marker_name: str):
-        """Immediately open plotter window and plot X, Y, Z coordinates of marker."""
-        if not self.trial or not marker_name:
-            return
-        if marker_name not in self.trial.markers:
+        """Immediately open plotter and plot X, Y, Z coordinates of marker."""
+        if not self.trial or not marker_name or marker_name not in self.trial.markers:
             return
 
         self.open_plotter_window()
-        if self.plotter_window:
-            self.plotter_window.plot_marker_coordinates(marker_name, components=("X", "Y", "Z"), clear_others=True)
-
-        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
-            self.plot_panel.plot_marker(marker_name, self.trial.markers[marker_name])
-
+        self.plotter_widget.plot_marker_coordinates(marker_name, components=("X", "Y", "Z"), clear_others=True)
         self.status.showMessage(f"Plotted coordinates for marker: {marker_name} (X, Y, Z)", 3000)
 
     def plot_markers(self, marker_names: List[str]):
-        """Immediately open plotter window and plot X, Y, Z coordinates of multiple markers."""
+        """Immediately open plotter and plot X, Y, Z coordinates of multiple markers."""
         if not self.trial or not marker_names:
             return
         valid_markers = [m for m in marker_names if m in self.trial.markers]
@@ -887,13 +902,7 @@ class MainWindow(QMainWindow):
             return
 
         self.open_plotter_window()
-        if self.plotter_window:
-            self.plotter_window.plot_markers_coordinates(valid_markers, components=("X", "Y", "Z"), clear_others=True)
-
-        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
-            for m in valid_markers:
-                self.plot_panel.plot_marker(m, self.trial.markers[m])
-
+        self.plotter_widget.plot_markers_coordinates(valid_markers, components=("X", "Y", "Z"), clear_others=True)
         self.status.showMessage(f"Plotted coordinates for {len(valid_markers)} markers (X, Y, Z)", 3000)
 
     def plot_marker_distance(self, m1: str, m2: str):
@@ -907,23 +916,14 @@ class MainWindow(QMainWindow):
         d1 = self.trial.markers[m1]
         d2 = self.trial.markers[m2]
         dist_traj = compute_distance_trajectory(d1, d2)
-        title = f"Distance: {m1} ↔ {m2}"
 
-        trim_rng = (self.timeline.trim_start_frame, self.timeline.trim_end_frame) if hasattr(self, 'timeline') else None
+        # Clear any 3D measurement line in 3D viewer (no connecting line)
+        if hasattr(self, 'viewer_3d'):
+            self.viewer_3d.set_distance_measurement("", "", False)
 
-        # 1. Pop up dedicated MeasurementPlotWindow (showing Euclidean distance, live stats & playhead sync)
-        self.show_measurement_plot(title, dist_traj, unit="mm", curve_type="Distance", trim_range=trim_rng)
-
-        # 2. Draw 3D measurement line & label in the 3D viewer
-        self.viewer_3d.set_distance_measurement(m1, m2, True)
-
-        # 3. Update docked plot_panel if open
-        if hasattr(self, 'plot_panel') and self.plot_panel.isVisible():
-            self.plot_panel.add_custom_curve(title, dist_traj)
-
-        # 4. If UniversalPlotterWindow is open, update it as well
-        if self.plotter_window and (self.plotter_window.isVisible() or not self.plotter_window.isHidden()):
-            self.plotter_window.plot_distance(m1, m2, dist_traj, clear_others=False)
+        # Update Universal Plotter directly (no separate pop-up window, no 3D line)
+        self.open_plotter_window()
+        self.plotter_widget.plot_distance(m1, m2, dist_traj, clear_others=False)
 
         self.status.showMessage(f"Plotted Euclidean distance between {m1} and {m2}", 3000)
 
@@ -931,15 +931,13 @@ class MainWindow(QMainWindow):
     # Event Management
     # ---------------------------------------------------------
     def _refresh_event_views(self):
-        """Update timeline, 2D plot panel, and side panel when events change."""
+        """Update timeline, 2D plotter, and side panel when events change."""
         if not self.trial:
             return
         self.trial.events.sort(key=lambda e: e.time)
         self.timeline.set_trial_data(self.trial.point_frame_count, self.trial.point_rate, self.trial.events)
         self.timeline.set_current_frame(self.playback.current_frame)
-        self.plot_panel.reload_events()
-        if self.plotter_window:
-            self.plotter_window.reload_events()
+        self.plotter_widget.reload_events()
         self.side_panel._populate_events()
         self._update_status_stats()
 
@@ -1109,16 +1107,12 @@ class MainWindow(QMainWindow):
             # Update 3D Viewport
             self.viewer_3d.load_trial(trial)
 
-            # Update 2D Plot Panel
-            self.plot_panel.load_trial(trial)
-            self.plot_panel.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
+            # Update Universal Plotter
+            self.plotter_widget.load_trial(trial)
+            self.plotter_widget.set_trim_range(self.timeline.trim_start_frame, self.timeline.trim_end_frame)
 
             # Update Side Inspector Panel
             self.side_panel.load_trial(trial)
-
-            # Update Universal Plotter Window if active
-            if self.plotter_window:
-                self.plotter_window.load_trial(trial)
 
             # Update Toolbar & Status
             self.lbl_rates.setText(f"Point: {round(trial.point_rate):.0f} Hz | Analog: {round(trial.analog_rate):.0f} Hz")
@@ -1144,9 +1138,12 @@ class MainWindow(QMainWindow):
         try:
             start_f = getattr(self.timeline, 'trim_start_frame', 0)
             end_f = getattr(self.timeline, 'trim_end_frame', self.trial.point_frame_count - 1)
+            is_trimmed = (start_f > 0 or end_f < self.trial.point_frame_count - 1)
             C3DWriter.save_c3d(self.trial, self.current_file_path, start_frame=start_f, end_frame=end_f)
-            trim_msg = f" (Trimmed: frames {start_f}–{end_f})" if (start_f > 0 or end_f < self.trial.point_frame_count - 1) else ""
+            trim_msg = f" (Trimmed: frames {start_f}–{end_f})" if is_trimmed else ""
             self.status.showMessage(f"Saved: {self.current_file_path}{trim_msg}", 3000)
+            if is_trimmed:
+                self.load_c3d_file(self.current_file_path)
         except Exception as e:
             QMessageBox.critical(self, "Save Error", f"Failed to save C3D:\n{e}")
 
@@ -1166,14 +1163,39 @@ class MainWindow(QMainWindow):
             try:
                 start_f = getattr(self.timeline, 'trim_start_frame', 0)
                 end_f = getattr(self.timeline, 'trim_end_frame', self.trial.point_frame_count - 1)
+                is_trimmed = (start_f > 0 or end_f < self.trial.point_frame_count - 1)
                 C3DWriter.save_c3d(self.trial, path, start_frame=start_f, end_frame=end_f)
-                self.current_file_path = path
-                self.setWindowTitle(f"C3D explorer — {os.path.basename(path)}")
-                self._add_recent_file(path)
-                trim_msg = f" (Trimmed: frames {start_f}–{end_f})" if (start_f > 0 or end_f < self.trial.point_frame_count - 1) else ""
-                self.status.showMessage(f"Saved as: {path}{trim_msg}", 3000)
+                trim_msg = f" (Trimmed: frames {start_f}–{end_f})" if is_trimmed else ""
+                n_ev = len([e for e in self.trial.events if start_f <= (e.frame if e.frame is not None else int(round(e.time * self.trial.point_rate))) <= end_f])
+                self.status.showMessage(f"Saved as: {path} ({n_ev} events){trim_msg}", 3000)
+                self.load_c3d_file(path)
             except Exception as e:
                 QMessageBox.critical(self, "Save Error", f"Failed to save C3D:\n{e}")
+
+    def export_c3d_dialog(self):
+        """Export the active C3D trial and events to a separate C3D file."""
+        if not self.trial:
+            QMessageBox.information(self, "Export C3D", "No C3D file is currently open.")
+            return
+        default_dir = os.path.dirname(self.current_file_path) if self.current_file_path else ""
+        base = os.path.splitext(os.path.basename(self.current_file_path))[0] if self.current_file_path else "export"
+        default_name = f"{base}_exported.c3d"
+        default_path = os.path.join(default_dir, default_name) if default_dir else default_name
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export C3D File", default_path, "C3D Motion Capture Files (*.c3d)"
+        )
+        if path:
+            if not path.lower().endswith(".c3d"):
+                path += ".c3d"
+            try:
+                start_f = getattr(self.timeline, 'trim_start_frame', 0)
+                end_f = getattr(self.timeline, 'trim_end_frame', self.trial.point_frame_count - 1)
+                C3DWriter.save_c3d(self.trial, path, start_frame=start_f, end_frame=end_f)
+                trim_msg = f" (Trimmed: frames {start_f}–{end_f})" if (start_f > 0 or end_f < self.trial.point_frame_count - 1) else ""
+                n_ev = len([e for e in self.trial.events if start_f <= (e.frame if e.frame is not None else int(round(e.time * self.trial.point_rate))) <= end_f])
+                self.status.showMessage(f"Exported C3D to: {path} ({n_ev} events){trim_msg}", 4000)
+            except Exception as e:
+                QMessageBox.critical(self, "Export Error", f"Failed to export C3D:\n{e}")
 
     def open_file_location(self):
         """Reveal active file in OS file manager (Finder on Mac, Explorer on Windows)."""
@@ -1290,21 +1312,17 @@ class MainWindow(QMainWindow):
     def apply_theme(self, theme_name: str):
         """Apply one of the 5 built-in professional themes across entire application."""
         theme_dict = get_theme(theme_name)
+        theme_name = theme_dict["name"]
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance()
         if app:
             app.setStyleSheet(theme_dict["qss"])
             app.setPalette(create_theme_palette(theme_dict))
         self.viewer_3d.apply_theme(theme_dict)
-        self.plot_panel.apply_theme(theme_dict)
+        self.plotter_widget.apply_theme(theme_dict)
         self.side_panel.apply_theme(theme_dict)
         if hasattr(self, 'timeline'):
             self.timeline.apply_theme(theme_dict)
-        if self.plotter_window:
-            self.plotter_window.apply_theme(theme_dict)
-        for m_win in self.measurement_plot_windows:
-            if hasattr(m_win, "plot_widget"):
-                m_win.plot_widget.setBackground(theme_dict.get("plot_bg", "#151720"))
         self.current_theme_name = theme_name
         is_dark = theme_dict.get("is_dark", True)
         if not is_dark:
@@ -1432,10 +1450,8 @@ class MainWindow(QMainWindow):
                     pg.setConfigOptions(antialias=aa)
                 except Exception:
                     pass
-            if hasattr(self, 'plot_panel'):
-                self.plot_panel.set_antialias(aa)
-            if self.plotter_window:
-                self.plotter_window.set_antialias(aa)
+            if hasattr(self, 'plotter_widget'):
+                self.plotter_widget.set_antialias(aa)
         if "timeline_display_mode" in cfg and hasattr(self, 'timeline'):
             self.timeline.set_display_mode(cfg["timeline_display_mode"])
         elif hasattr(self, 'timeline'):

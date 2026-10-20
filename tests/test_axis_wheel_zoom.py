@@ -12,8 +12,6 @@ from PySide6.QtGui import QWheelEvent, QMouseEvent
 
 from core.c3d_reader import C3DReader
 from gui.plotter_window import UniversalPlotterWindow, enable_axis_wheel_zoom
-from gui.measurement_plot_window import MeasurementPlotWindow
-from gui.plot_panel import PlotPanel
 
 
 def create_wheel_event(pos: QPointF, delta_y: int = 120, delta_x: int = 0, modifiers=Qt.NoModifier):
@@ -172,85 +170,7 @@ def test_universal_plotter_axis_zoom():
     win.close()
 
 
-def test_measurement_plot_window_axis_zoom():
-    print("Testing MeasurementPlotWindow axis wheel zoom...", flush=True)
-    y_data = np.linspace(10.0, 50.0, 200)
-    meas_win = MeasurementPlotWindow(
-        title="Knee Distance",
-        y_data=y_data,
-        point_rate=100.0,
-        unit="mm",
-        curve_type="Distance"
-    )
-    meas_win.show()
-    QApplication.processEvents()
-
-    vb = meas_win.plot_widget.getViewBox()
-    axis_b = meas_win.plot_widget.getPlotItem().getAxis("bottom")
-    axis_l = meas_win.plot_widget.getPlotItem().getAxis("left")
-
-    init_x = list(vb.viewRange()[0])
-    init_y = list(vb.viewRange()[1])
-
-    # Scroll on X axis
-    b_pt = axis_b.mapRectToScene(axis_b.rect()).center()
-    wheel_x = create_wheel_event(b_pt, delta_y=120)
-    QApplication.sendEvent(meas_win.plot_widget.viewport(), wheel_x)
-    assert (vb.viewRange()[0][1] - vb.viewRange()[0][0]) < (init_x[1] - init_x[0])
-    assert np.isclose(vb.viewRange()[1][0], init_y[0]) and np.isclose(vb.viewRange()[1][1], init_y[1])
-
-    # Scroll on Y axis
-    l_pt = axis_l.mapRectToScene(axis_l.rect()).center()
-    wheel_y = create_wheel_event(l_pt, delta_y=120)
-    QApplication.sendEvent(meas_win.plot_widget.viewport(), wheel_y)
-    assert (vb.viewRange()[1][1] - vb.viewRange()[1][0]) < (init_y[1] - init_y[0])
-
-    meas_win.close()
-    print("✓ MeasurementPlotWindow axis zooming verified!")
-
-
-def test_plot_panel_axis_zoom():
-    print("Testing PlotPanel axis wheel zoom...", flush=True)
-    c3d_path = "/Users/mikey/Library/CloudStorage/OneDrive-UniversitätKoblenz/Koblenz/Reserach Projects/OpenSim Pipeline/Jumping/Sample data/MHJ/P01_PRE_L_REF.c3d"
-    trial = C3DReader.read(c3d_path)
-
-    panel = PlotPanel()
-    panel.show()
-    panel.load_trial(trial)
-    QApplication.processEvents()
-
-    # Select an item in the list
-    if panel.channel_list.count() > 0:
-        panel.channel_list.item(0).setCheckState(Qt.Checked)
-    QApplication.processEvents()
-
-    vb = panel.plot_widget.getViewBox()
-    axis_b = panel.plot_widget.getPlotItem().getAxis("bottom")
-    axis_l = panel.plot_widget.getPlotItem().getAxis("left")
-
-    init_x = list(vb.viewRange()[0])
-    init_y = list(vb.viewRange()[1])
-
-    # Scroll on X axis
-    b_pt = axis_b.mapRectToScene(axis_b.rect()).center()
-    wheel_x = create_wheel_event(b_pt, delta_y=120)
-    QApplication.sendEvent(panel.plot_widget.viewport(), wheel_x)
-    assert (vb.viewRange()[0][1] - vb.viewRange()[0][0]) < (init_x[1] - init_x[0])
-    assert np.isclose(vb.viewRange()[1][0], init_y[0]) and np.isclose(vb.viewRange()[1][1], init_y[1])
-
-    # Scroll on Y axis
-    l_pt = axis_l.mapRectToScene(axis_l.rect()).center()
-    wheel_y = create_wheel_event(l_pt, delta_y=120)
-    QApplication.sendEvent(panel.plot_widget.viewport(), wheel_y)
-    assert (vb.viewRange()[1][1] - vb.viewRange()[1][0]) < (init_y[1] - init_y[0])
-
-    panel.close()
-    print("✓ PlotPanel axis zooming verified!")
-
-
 if __name__ == "__main__":
     app = QApplication.instance() or QApplication(sys.argv)
     test_universal_plotter_axis_zoom()
-    test_measurement_plot_window_axis_zoom()
-    test_plot_panel_axis_zoom()
     print("\nALL AXIS WHEEL ZOOM TESTS PASSED PERFECTLY!", flush=True)

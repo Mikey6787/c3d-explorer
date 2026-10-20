@@ -123,28 +123,21 @@ def test_marker_plot_flow():
     assert len(active_keys_multi) == 6
     print("MainWindow.plot_markers correctly plotted multi-marker coordinates!")
 
-    # 5. Test Distance Calculation & Dedicated Measurement Plot Window
+    # 5. Test Distance Calculation & Universal Plotter Display
+    dist_label = "Distance: RASI ↔ LASI (mm)"
     mw.plot_marker_distance("RASI", "LASI")
-    assert len(mw.measurement_plot_windows) == 1, "Must open dedicated MeasurementPlotWindow for distance"
-    m_win = mw.measurement_plot_windows[0]
-    assert m_win.curve_title == "Distance: RASI ↔ LASI"
-    assert m_win.unit == "mm"
-    assert m_win.curve_type == "Distance"
-    assert len(m_win.y_data) == n_frames
+    assert dist_label in pw.active_curves, f"Expected {dist_label} in plotter active curves: {list(pw.active_curves.keys())}"
+    plot_data_y = pw.active_curves[dist_label].getData()[1]
+    assert len(plot_data_y) == n_frames
 
     # Verify Euclidean distance calculation correctness
     expected_dist = np.linalg.norm(trial.markers["RASI"] - trial.markers["LASI"], axis=1)
-    np.testing.assert_allclose(m_win.y_data, expected_dist, rtol=1e-5)
-    print("Euclidean distance computation matches np.linalg.norm perfectly!")
+    np.testing.assert_allclose(plot_data_y, expected_dist, rtol=1e-5)
+    print("Euclidean distance computation matches np.linalg.norm perfectly in Universal Plotter!")
 
-    # Verify 3D line overlay in viewer_3d
-    assert mw.viewer_3d.active_measurement == {"type": "distance", "m1": "RASI", "m2": "LASI"}
-    print("3D Viewport distance measurement line & label overlay activated!")
-
-    # Test closing the measurement window cleans up 3D measurement line
-    m_win.close()
+    # Verify NO 3D line overlay in viewer_3d
     assert mw.viewer_3d.active_measurement is None or mw.viewer_3d.active_measurement.get("m1") == ""
-    print("Measurement window close lifecycle verified!")
+    print("3D Viewport distance measurement connecting line correctly omitted!")
 
     # 6. Test 3D Viewer right-click context menu signal forwarding
     single_plot_received = []

@@ -10,12 +10,11 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
     QLineEdit, QPushButton, QLabel, QGroupBox, QCheckBox,
     QMessageBox, QColorDialog, QInputDialog, QFileDialog,
-    QRadioButton, QDoubleSpinBox, QWidget
+    QRadioButton, QDoubleSpinBox, QSpinBox, QWidget
 )
 from gui.toggle_switch import ToggleSwitch
 
 from core.data_models import C3DTrial
-from gui.measurement_plot_window import MeasurementPlotWindow
 
 
 
@@ -324,21 +323,6 @@ class MeasureDistanceDialog(QDialog):
         if self._distance_trajectory is not None:
             lbl = f"Dist_{m1}_{m2}"
             self.plotRequested.emit(lbl, self._distance_trajectory)
-            title = f"Distance: {m1} ↔ {m2}"
-            self.openPlotWindowRequested.emit(title, self._distance_trajectory, "mm", "Distance")
-            if not self.parent():
-                rate = self.trial.point_rate if self.trial else 100.0
-                self._plot_window = MeasurementPlotWindow(
-                    title=title,
-                    y_data=self._distance_trajectory,
-                    point_rate=rate,
-                    unit="mm",
-                    curve_type="Distance",
-                    current_frame=self.current_frame,
-                    trim_range=self.trim_range,
-                    parent=None
-                )
-                self._plot_window.show()
 
     def closeEvent(self, event):
         # Clear 3D visualization when dialog is closed
@@ -524,21 +508,6 @@ class MeasureAngleDialog(QDialog):
         if self._angle_trajectory is not None:
             lbl = f"Angle_{ma}_{mb}_{mc}"
             self.plotRequested.emit(lbl, self._angle_trajectory)
-            title = f"Angle: {ma} - {mb} - {mc}"
-            self.openPlotWindowRequested.emit(title, self._angle_trajectory, "°", "Angle")
-            if not self.parent():
-                rate = self.trial.point_rate if self.trial else 100.0
-                self._plot_window = MeasurementPlotWindow(
-                    title=title,
-                    y_data=self._angle_trajectory,
-                    point_rate=rate,
-                    unit="°",
-                    curve_type="Angle",
-                    current_frame=self.current_frame,
-                    trim_range=self.trim_range,
-                    parent=None
-                )
-                self._plot_window.show()
 
     def closeEvent(self, event):
         self.visualize3DRequested.emit("", "", "", False)
@@ -920,4 +889,142 @@ class AddMarkerDialog(QDialog):
 
         self.markerAdded.emit(name, data, self.selected_color)
         self.accept()
+
+
+def filter_marker_array(data: np.ndarray, fs: float, order: int, cutoff: float) -> np.ndarray:
+    """
+    Apply zero-phase Butterworth low-pass filter to a (N, 3) marker coordinate trajectory.
+    Handles NaN values (gap interpolation & restoration) and boundary conditions.
+    """
+    if data is None or len(data) == 0:
+        return data.copy() if data is not None else data
+
+    from scipy import signal
+
+    N, dims = data.shape
+    filtered = np.zeros_like(data, dtype=np.float64)
+    nyq = 0.5 * fs
+    wn = min(max(cutoff / nyq, 0.0001), 0.9999)
+    b, a = signal.butter(order, wn, btype="low")
+
+    padlen = min(3 * max(len(a), len(b)), N - 1) if N > 3 else None
+
+    for col in range(dims):
+        col_data = data[:, col].astype(np.float64)
+        valid = ~np.isnan(col_data) & ~((col_data == 0.0) & (np.all(data == 0.0, axis=1)))
+        if not np.any(valid):
+            filtered[:, col] = col_data
+            continue
+
+        clean = col_data.copy()
+        if not np.all(valid):
+            x = np.arange(N)
+            clean[~valid] = np.interp(x[~valid], x[valid], col_data[valid])
+
+        if N > (padlen if padlen is not None else 6):
+            if padlen is not None:
+                f_col = signal.filtfilt(b, a, clean, padlen=padlen)
+            else:
+                f_col = signal.filtfilt(b, a, clean)
+        else:
+            f_col = clean
+
+        if not np.all(valid):
+            f_col[~valid] = col_data[~valid]
+        filtered[:, col] = f_col
+
+    return filtered
+
+
+class FilterMarkersDialog(QDialog):
+    """
+    Dialog asking the user for Butterworth filter order and cutoff frequency (Hz)
+    to filter all 3D marker trajectories in the trial.
+    """
+    filterApplied = Signal(int, float)  # order, cutoff_hz
+
+    def __init__(self, trial: C3DTrial, parent=None):
+        super().__init__(parent)
+        self.trial = trial
+        self.setWindowTitle("Filter All Markers")
+        self.setMinimumWidth(400)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setContentsMargins(18, 18, 18, 18)
+
+        # Header info
+        lbl_desc = QLabel("Apply zero-phase Butterworth low-pass filter to all marker trajectories.")
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet("color: #ECEFF4; font-size: 13px; font-weight: 500;")
+        layout.addWidget(lbl_desc)
+
+        fs = float(self.trial.point_rate) if self.trial and self.trial.point_rate > 0 else 100.0
+        nyq = 0.5 * fs
+        n_markers = len(self.trial.markers) if self.trial else 0
+
+        lbl_fs = QLabel(f"Markers: {n_markers}  |  Sampling Rate: {fs:.1f} Hz  |  Nyquist: {nyq:.1f} Hz")
+        lbl_fs.setStyleSheet("color: #8F9BB3; font-size: 11px;")
+        layout.addWidget(lbl_fs)
+
+        form_group = QGroupBox("Filter Parameters")
+        form_layout = QFormLayout(form_group)
+        form_layout.setSpacing(10)
+        form_layout.setLabelAlignment(Qt.AlignRight)
+
+        # Filter Order
+        self.spin_order = QSpinBox()
+        self.spin_order.setRange(1, 10)
+        self.spin_order.setValue(4)
+        self.spin_order.setToolTip("Order of the Butterworth low-pass filter (standard motion capture is 4th order)")
+        form_layout.addRow("Filter Order:", self.spin_order)
+
+        # Cutoff Frequency
+        self.spin_cutoff = QDoubleSpinBox()
+        self.spin_cutoff.setRange(0.1, max(0.2, nyq - 0.1))
+        self.spin_cutoff.setDecimals(1)
+        self.spin_cutoff.setSingleStep(0.5)
+        default_cutoff = min(6.0, max(0.5, nyq * 0.5))
+        self.spin_cutoff.setValue(default_cutoff)
+        self.spin_cutoff.setSuffix(" Hz")
+        self.spin_cutoff.setToolTip(f"Cutoff frequency in Hz (must be strictly less than Nyquist frequency {nyq:.1f} Hz)")
+        form_layout.addRow("Cutoff Frequency:", self.spin_cutoff)
+
+        layout.addWidget(form_group)
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        btn_apply = QPushButton("Apply Filter")
+        btn_apply.setObjectName("primaryBtn")
+        btn_apply.setDefault(True)
+        btn_apply.clicked.connect(self._on_apply_clicked)
+        btn_box.addWidget(btn_apply)
+
+        layout.addLayout(btn_box)
+
+    def _on_apply_clicked(self):
+        fs = float(self.trial.point_rate) if self.trial and self.trial.point_rate > 0 else 100.0
+        nyq = 0.5 * fs
+        order = self.spin_order.value()
+        cutoff = self.spin_cutoff.value()
+
+        if cutoff <= 0 or cutoff >= nyq:
+            if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+                QMessageBox.warning(
+                    self, "Invalid Cutoff",
+                    f"Cutoff frequency must be strictly between 0 and Nyquist frequency ({nyq:.1f} Hz)."
+                )
+            return
+
+        self.filterApplied.emit(order, cutoff)
+        self.accept()
+
 

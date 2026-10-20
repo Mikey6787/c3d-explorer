@@ -56,6 +56,104 @@ class C3DEvent:
         return self.name
 
 
+def are_duplicate_events(e1: C3DEvent, e2: C3DEvent, time_tol: float) -> bool:
+    """Check if e1 and e2 represent duplicate events at the same timestamp/frame."""
+    time_match = abs(e1.time - e2.time) <= time_tol
+    frame_match = (e1.frame is not None and e2.frame is not None and e1.frame == e2.frame)
+    if not (time_match or frame_match):
+        return False
+
+    norm1 = (e1.name or "").strip().lower()
+    norm2 = (e2.name or "").strip().lower()
+    ctx1 = (e1.context or "").strip().lower()
+    ctx2 = (e2.context or "").strip().lower()
+    gen1 = not ctx1 or ctx1 == "general"
+    gen2 = not ctx2 or ctx2 == "general"
+
+    # Exact name and context match
+    if norm1 == norm2 and ctx1 == ctx2:
+        return True
+
+    # Both in same specific context (e.g. Left Foot strike vs Left Foot strike)
+    if not gen1 and not gen2 and ctx1 == ctx2:
+        if norm1 in norm2 or norm2 in norm1:
+            return True
+
+    # One general, one specific (e.g. LHS [General] vs Foot strike [Left], or LTO [General] vs Left foot off [Left])
+    if (gen1 and not gen2) or (gen2 and not gen1):
+        gen_norm = norm1 if gen1 else norm2
+        spec_norm = norm2 if gen1 else norm1
+        spec_ctx = ctx2 if gen1 else ctx1
+
+        if gen_norm in spec_norm or spec_norm in gen_norm:
+            return True
+
+        gait_abbrevs = {
+            "left": ("lhs", "lto", "lfs", "lfo", "fs", "fo", "strike", "off", "contact"),
+            "right": ("rhs", "rto", "rfs", "rfo", "fs", "fo", "strike", "off", "contact"),
+        }
+        if spec_ctx in gait_abbrevs and gen_norm in gait_abbrevs[spec_ctx]:
+            return True
+
+    # Both in general context
+    if gen1 and gen2:
+        if norm1 in norm2 or norm2 in norm1:
+            return True
+
+    return False
+
+
+def deduplicate_events(events: List[C3DEvent], point_rate: float = 100.0) -> List[C3DEvent]:
+    """
+    Remove duplicate events caused by dual header/parameter synchronization
+    (e.g. 'Foot strike' in Left context and 'LHS' in General context at the same timestamp).
+    Prefers specific leg context (Left/Right) over General context.
+    """
+    if len(events) <= 1:
+        return list(events)
+
+    time_tol = max(0.01, 1.0 / point_rate) if point_rate > 0 else 0.01
+
+    cleaned: List[C3DEvent] = []
+    # Sort primarily by approximate frame, placing specific contexts before general
+    sorted_events = sorted(
+        events,
+        key=lambda e: (
+            int(round(e.time * point_rate)) if point_rate > 0 else int(round(e.time * 100)),
+            0 if (e.context and e.context.lower() not in ("general", "")) else 1,
+            e.time
+        )
+    )
+
+    for ev in sorted_events:
+        ev_ctx = (ev.context or "").strip().lower()
+        ev_is_gen = not ev_ctx or ev_ctx == "general"
+
+        dup_idx = -1
+        for idx, kept in enumerate(cleaned):
+            if are_duplicate_events(ev, kept, time_tol):
+                dup_idx = idx
+                break
+
+        if dup_idx == -1:
+            cleaned.append(ev)
+        else:
+            kept = cleaned[dup_idx]
+            kept_ctx = (kept.context or "").strip().lower()
+            kept_is_gen = not kept_ctx or kept_ctx == "general"
+
+            # If existing kept event is General but new event is Specific, replace it!
+            if kept_is_gen and not ev_is_gen:
+                cleaned[dup_idx] = ev
+            # Otherwise, if both specific, keep the more descriptive/longer name
+            elif not kept_is_gen and not ev_is_gen:
+                if len(ev.name or "") > len(kept.name or ""):
+                    cleaned[dup_idx] = ev
+
+    cleaned.sort(key=lambda e: e.time)
+    return cleaned
+
+
 @dataclass
 class ForcePlatformData:
     """Represents a force platform including geometric corners, origin, and signals."""

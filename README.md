@@ -97,11 +97,11 @@ Under **`Tools -> Events`** (or timeline right-click):
 Under **`Settings -> Visual Configurations...`**:
 - **Display Tab**:
   - **5 Professional Themes**:
-    - `Biomech Dark (Obsidian & Cyan)`: Dark biomechanics workstation theme.
-    - `Clinical Light (Clean Medical White)`: Crisp high-contrast clinical laboratory theme.
-    - `Nordic Midnight (Arctic Deep Blue)`: Nord frost teal and deep slate theme.
-    - `Graphite Slate (Monochrome Titanium)`: Industrial titanium and safety amber theme.
-    - `Cyber Amber (Navy & Gold)`: Deep aerospace navy and vibrant goldenrod theme.
+    - `Biomech Dark`: Dark biomechanics workstation theme.
+    - `Clinical Light`: Crisp high-contrast clinical laboratory theme.
+    - `Nordic Midnight`: Nord frost teal and deep slate theme.
+    - `Graphite Slate`: Industrial titanium and safety amber theme.
+    - `Cyber Amber`: Deep aerospace navy and vibrant goldenrod theme.
   - **Quick Theme Switching**: Also accessible via **`View -> Theme`** in the main menu bar.
   - **3D Viewport Background**: Choice of Dark, Deep Slate, Pure Black, or Crisp White.
   - **Ground Grid**: Toggle ground grid visibility and set grid spacing in millimeters.
@@ -118,9 +118,9 @@ Under **`Settings -> Visual Configurations...`**:
 ### 10. Menus & File I/O
 - **File**: Open C3D (`Ctrl+O` / `Cmd+O`), Open Recent files list, Open File Location (Finder/Explorer), Save (`Ctrl+S`), Save As, Export C3D, Export as STL, Export CSV (Markers / Analogs), Exit.
 - **Edit**: Undo (`Ctrl+Z`), Redo (`Ctrl+Y` / `Cmd+Shift+Z`), Export Summary Report.
-- **View**: Reset View, Top, Front, Side, Iso views, Theme selection (`View -> Theme`), show/hide markers, plates, axes, grid, GRF vectors, and Panels submenu (`Markers`, `Analog`).
+- **View**: Reset View, Top, Front, Side, Iso views, Theme selection (`View -> Theme`), show/hide markers, plates, axes, grid, GRF vectors, and Panels submenu (`Data Explorer`, `Plotter`).
 - **Settings**: Direct dialog for visual configurations (Display, Coordinate System, 3D Visuals, Playback).
-- **Tools**: Plotter (`Ctrl+P`), Events (`Ctrl+E`), Marker submenu (Average, Distance, Angle, Rename, Color).
+- **Tools**: Plotter (`Ctrl+P`), Analog Channels & Signal Processing, Events (`Ctrl+E`), Marker submenu (Average, Distance, Angle, Rename, Color).
 - **Drag & Drop**: Drag any `.c3d` file directly into the window.
 
 ---

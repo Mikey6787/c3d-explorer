@@ -8,9 +8,8 @@ from PySide6.QtWidgets import QApplication, QPushButton
 from app import MainWindow
 from core.data_models import C3DTrial
 from gui.marker_tools_dialog import MeasureDistanceDialog, MeasureAngleDialog
-from gui.measurement_plot_window import MeasurementPlotWindow
 
-print("Initializing Measurement Plot Window test...", flush=True)
+print("Initializing Measurement Plotting (in Universal Plotter) test...", flush=True)
 app = QApplication.instance() or QApplication(sys.argv)
 
 # Create a mock trial with 2 markers
@@ -43,89 +42,52 @@ assert len(plot_buttons) == 1, f"Expected button with text 'Plot', found {[b.tex
 btn_plot = plot_buttons[0]
 print("Verified MeasureDistanceDialog has 'Plot' button.")
 
-# Test clicking 'Plot'
-opened_windows = []
-dist_dlg.openPlotWindowRequested.connect(lambda title, data, unit, ctype: opened_windows.append((title, data, unit, ctype)))
+# Test clicking 'Plot' emits plotRequested to plotter (no popup window)
+plot_requests = []
+dist_dlg.plotRequested.connect(lambda label, data: plot_requests.append((label, data)))
 btn_plot.click()
 
-assert len(opened_windows) == 1
-title, data, unit, ctype = opened_windows[0]
-assert "Distance: L_ACR ↔ R_ACR" in title
+assert len(plot_requests) == 1
+label, data = plot_requests[0]
+assert label == "Dist_L_ACR_R_ACR"
 assert len(data) == n_frames
-assert unit == "mm"
-assert ctype == "Distance"
-print("Verified MeasureDistanceDialog clicking 'Plot' emits openPlotWindowRequested immediately without blocking.")
+print("Verified MeasureDistanceDialog clicking 'Plot' emits plotRequested directly without opening separate window.")
 
 # 2. Test MeasureAngleDialog
 angle_dlg = MeasureAngleDialog(trial, current_frame=50, preselected=["L_ACR", "R_ACR", "V_ACR"])
 angle_plot_btns = [b for b in angle_dlg.findChildren(QPushButton) if b.text() == "Plot"]
 assert len(angle_plot_btns) == 1, f"Expected angle button 'Plot', found {[b.text() for b in angle_dlg.findChildren(QPushButton)]}"
-print("Verified MeasureAngleDialog has 'Plot' button.")
 
-# 3. Test MeasurementPlotWindow functionality
-win = MeasurementPlotWindow(
-    title="Distance: L_ACR ↔ R_ACR",
-    y_data=data,
-    point_rate=rate,
-    unit="mm",
-    curve_type="Distance",
-    current_frame=50
-)
-win.show()
+angle_requests = []
+angle_dlg.plotRequested.connect(lambda label, data: angle_requests.append((label, data)))
+angle_plot_btns[0].click()
 
-# Test cursor update
-win.update_frame(80)
-assert win.current_frame == 80
-assert "Frame 81" in win.lbl_current_val.text()
+assert len(angle_requests) == 1
+assert angle_requests[0][0] == "Angle_L_ACR_R_ACR_V_ACR"
+print("Verified MeasureAngleDialog clicking 'Plot' emits plotRequested directly without opening separate window.")
 
-# Initial mode is Frame by default
-assert win.x_axis_mode == "frame"
-
-# Test cursor dragged signal
-cursor_times = []
-win.timeCursorMoved.connect(lambda t: cursor_times.append(t))
-win.time_cursor.setValue(51.0)
-win._on_cursor_dragged()
-assert len(cursor_times) > 0
-assert abs(cursor_times[0] - 50.0 / rate) < 1e-4
-
-# Test Fit ROI and Fit Full in Frame mode (default)
-win.set_trim_range(20, 80)
-win.fit_roi()
-vb_range_x = win.plot_widget.getViewBox().viewRange()[0]
-assert vb_range_x[0] <= 21 and vb_range_x[1] >= 81, "fit_roi should zoom to ROI range in frames"
-print("Verified Fit ROI zooms strictly to ROI bounds in Frame mode!")
-
-win.auto_range()
-vb_full_x = win.plot_widget.getViewBox().viewRange()[0]
-assert vb_full_x[0] <= 1.0 and vb_full_x[1] >= n_frames, "auto_range should zoom to full curve in frames"
-print("Verified Fit Full zooms to entire trial bounds in Frame mode!")
-
-# Test time/frame mode switch
-win._on_axis_mode_changed(0)  # switch to time
-assert win.x_axis_mode == "time"
-win.fit_roi()
-vb_range_t = win.plot_widget.getViewBox().viewRange()[0]
-assert vb_range_t[0] <= 20 / rate and vb_range_t[1] >= 80 / rate, "fit_roi should zoom to ROI range in time"
-
-win._on_axis_mode_changed(1)  # switch back to frames
-assert win.x_axis_mode == "frame"
-
-print("MeasurementPlotWindow verified completely!")
-
-# 4. Test MainWindow Integration
+# 3. Test MainWindow Integration
 main_win = MainWindow()
+main_win.show()
+QApplication.processEvents()
 main_win.trial = trial
 main_win.playback.total_frames = n_frames
 main_win.playback.point_rate = rate
+main_win.plotter_widget.load_trial(trial)
 
+# Test show_measurement_plot plots directly into Universal Plotter
 main_win.show_measurement_plot("Distance: L_ACR ↔ R_ACR", data, "mm", "Distance")
-assert len(main_win.measurement_plot_windows) == 1
-assert main_win.measurement_plot_windows[0].isVisible()
+assert "Distance: L_ACR ↔ R_ACR" in main_win.plotter_widget.active_curves
+assert hasattr(main_win, "measurement_plot_windows") is False or len(getattr(main_win, "measurement_plot_windows", [])) == 0
 
-# Advance frame in MainWindow and verify synchronized update
+# Test plot_marker_distance plots directly into Universal Plotter
+main_win.plot_marker_distance("L_ACR", "R_ACR")
+expected_dist_label = "Distance: L_ACR ↔ R_ACR (mm)"
+assert expected_dist_label in main_win.plotter_widget.active_curves
+
+# Advance frame in MainWindow and verify synchronized update in plotter
 main_win._on_frame_changed(120)
-assert main_win.measurement_plot_windows[0].current_frame == 120
+assert main_win.plotter_widget.current_frame == 120
 
-print("MainWindow measurement plot window synchronization verified!")
+print("MainWindow distance measurement in Universal Plotter synchronization verified!")
 print("ALL TESTS PASSED SUCCESSFULLY!")

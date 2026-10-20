@@ -1,6 +1,7 @@
 """C3D file reader utilizing ezc3d and native GRW calculation."""
 
 import os
+import struct
 from typing import Optional, List, Dict, Any
 import numpy as np
 
@@ -10,7 +11,7 @@ try:
 except ImportError:
     EZC3D_AVAILABLE = False
 
-from core.data_models import C3DTrial, ForcePlatformData, C3DEvent
+from core.data_models import C3DTrial, ForcePlatformData, C3DEvent, deduplicate_events
 from core.grw_calculator import compute_ground_reaction_wrenches
 
 
@@ -239,8 +240,13 @@ class C3DReader:
                             t_val = float(times_arr[i])
 
                     # Calculate relative frame index (0-based)
-                    frame_idx = int(round(t_val * point_rate)) if point_rate > 0 else 0
+                    raw_frame = int(round(t_val * point_rate)) if point_rate > 0 else 0
+                    if first_frame > 1 and raw_frame >= (first_frame - 1):
+                        frame_idx = raw_frame - (first_frame - 1)
+                    else:
+                        frame_idx = raw_frame
                     frame_idx = max(0, min(point_frame_count - 1, frame_idx))
+                    rel_time = frame_idx / point_rate if point_rate > 0 else 0.0
 
                     # Context inference
                     if not ctx_str:
@@ -263,7 +269,7 @@ class C3DReader:
                     color = get_event_color(lbl_str, ctx_str)
                     events_list.append(C3DEvent(
                         name=lbl_str,
-                        time=t_val,
+                        time=rel_time,
                         frame=frame_idx,
                         subject=subj_str,
                         context=ctx_str,
@@ -274,8 +280,70 @@ class C3DReader:
         except Exception as e:
             print(f"Warning parsing events with ezc3d: {e}")
 
-        # Sort events chronologically
-        events_list.sort(key=lambda ev: ev.time)
+        # Fallback: check C3D header events (Words 150-234) if parameter events not found
+        if not events_list:
+            try:
+                hdr_events = c.get('header', {}).get('events', {})
+                hdr_times = hdr_events.get('events_time', ())
+                hdr_labels = hdr_events.get('events_label', ())
+
+                # Check Word 151 from binary header if accessible
+                max_header_events = 18
+                if os.path.isfile(file_path):
+                    with open(file_path, "rb") as fp:
+                        raw_hdr = fp.read(512)
+                        if len(raw_hdr) >= 302:
+                            w151 = struct.unpack("<h", raw_hdr[300:302])[0]
+                            if 0 <= w151 <= 18:
+                                max_header_events = w151
+
+                count = min(max_header_events, len(hdr_times))
+                for i in range(count):
+                    t_val = float(hdr_times[i]) if i < len(hdr_times) else 0.0
+                    lbl_str = str(hdr_labels[i]).strip() if i < len(hdr_labels) else ""
+                    # Header unused event slots have empty label and time == 0.0
+                    if not lbl_str and t_val == 0.0:
+                        continue
+                    if not lbl_str:
+                        lbl_str = f"Event_{i + 1}"
+
+                    raw_frame = int(round(t_val * point_rate)) if point_rate > 0 else 0
+                    if first_frame > 1 and raw_frame >= (first_frame - 1):
+                        frame_idx = raw_frame - (first_frame - 1)
+                    else:
+                        frame_idx = raw_frame
+                    frame_idx = max(0, min(point_frame_count - 1, frame_idx))
+                    rel_time = frame_idx / point_rate if point_rate > 0 else 0.0
+
+                    lower = lbl_str.lower()
+                    ctx_str = "General"
+                    if lower.startswith("r") or "right" in lower:
+                        ctx_str = "Right"
+                    elif lower.startswith("l") or "left" in lower:
+                        ctx_str = "Left"
+
+                    ev_id = 0
+                    if any(s in lower for s in ("strike", "contact", "hs", "fs")):
+                        ev_id = 1
+                    elif any(s in lower for s in ("off", "to", "fo")):
+                        ev_id = 2
+
+                    color = get_event_color(lbl_str, ctx_str)
+                    events_list.append(C3DEvent(
+                        name=lbl_str,
+                        time=rel_time,
+                        frame=frame_idx,
+                        subject="",
+                        context=ctx_str,
+                        description="",
+                        event_id=ev_id,
+                        icon_color=color
+                    ))
+            except Exception as e:
+                print(f"Warning parsing header events fallback: {e}")
+
+        # Deduplicate and sort events chronologically
+        events_list = deduplicate_events(events_list, point_rate)
 
         # Metadata tree
         metadata_tree: Dict[str, Any] = {}

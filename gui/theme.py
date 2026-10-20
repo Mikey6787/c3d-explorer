@@ -381,8 +381,8 @@ QGroupBox::title {{
 # 5 Professional Built-In Theme Definitions
 # -------------------------------------------------------------
 THEMES: Dict[str, Dict[str, Any]] = {
-    "Biomech Dark (Obsidian & Cyan)": {
-        "name": "Biomech Dark (Obsidian & Cyan)",
+    "Biomech Dark": {
+        "name": "Biomech Dark",
         "is_dark": True,
         "accent": "#00ADB5",
         "viewport_bg": "#151720",
@@ -413,8 +413,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             alternate_bg="#1E2231"
         )
     },
-    "Clinical Light (Clean Medical White)": {
-        "name": "Clinical Light (Clean Medical White)",
+    "Clinical Light": {
+        "name": "Clinical Light",
         "is_dark": False,
         "accent": "#0284C7",
         "viewport_bg": "#EDF2F7",
@@ -445,8 +445,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             alternate_bg="#F8FAFC"
         )
     },
-    "Nordic Midnight (Arctic Deep Blue)": {
-        "name": "Nordic Midnight (Arctic Deep Blue)",
+    "Nordic Midnight": {
+        "name": "Nordic Midnight",
         "is_dark": True,
         "accent": "#88C0D0",
         "viewport_bg": "#1E222A",
@@ -477,8 +477,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             alternate_bg="#282D38"
         )
     },
-    "Graphite Slate (Monochrome Titanium)": {
-        "name": "Graphite Slate (Monochrome Titanium)",
+    "Graphite Slate": {
+        "name": "Graphite Slate",
         "is_dark": True,
         "accent": "#F39C12",
         "viewport_bg": "#161718",
@@ -509,8 +509,8 @@ THEMES: Dict[str, Dict[str, Any]] = {
             alternate_bg="#26282B"
         )
     },
-    "Cyber Amber (Navy & Gold)": {
-        "name": "Cyber Amber (Navy & Gold)",
+    "Cyber Amber": {
+        "name": "Cyber Amber",
         "is_dark": True,
         "accent": "#FFB703",
         "viewport_bg": "#090F16",
@@ -544,7 +544,7 @@ THEMES: Dict[str, Dict[str, Any]] = {
 
 }
 
-DEFAULT_THEME_NAME = "Biomech Dark (Obsidian & Cyan)"
+DEFAULT_THEME_NAME = "Biomech Dark"
 DARK_THEME_QSS = THEMES[DEFAULT_THEME_NAME]["qss"]
 
 
@@ -555,7 +555,13 @@ def get_theme_names() -> List[str]:
 
 def get_theme(name: str) -> Dict[str, Any]:
     """Retrieve theme dictionary by name, falling back to default."""
-    return THEMES.get(name, THEMES[DEFAULT_THEME_NAME])
+    if name in THEMES:
+        return THEMES[name]
+    if name:
+        short_name = name.split(" (")[0].strip()
+        if short_name in THEMES:
+            return THEMES[short_name]
+    return THEMES[DEFAULT_THEME_NAME]
 
 
 def create_theme_palette(theme_dict: Dict[str, Any]):

@@ -189,6 +189,24 @@ plotter.clear_all_curves()
 assert len(plotter.event_lines) == 2, "Event lines must remain after clear_all_curves"
 print("Event dashed lines persistence verified!", flush=True)
 
+# Test right-click context menu is completely disabled
+assert plotter.plot_widget.contextMenuPolicy() == Qt.NoContextMenu
+assert plotter.plot_widget.getPlotItem().menuEnabled() is False
+assert plotter.plot_widget.getPlotItem().getViewBox().menuEnabled() is False
+assert plotter.tree.contextMenuPolicy() == Qt.NoContextMenu
+
+# Simulate right click on plot widget and viewport
+from PySide6.QtCore import QPoint, QEvent
+from PySide6.QtGui import QContextMenuEvent, QMouseEvent
+cme = QContextMenuEvent(QContextMenuEvent.Mouse, QPoint(100, 100))
+app.sendEvent(plotter.plot_widget.viewport(), cme)
+app.sendEvent(plotter.plot_widget, cme)
+press = QMouseEvent(QEvent.MouseButtonPress, QPointF(100, 100), Qt.RightButton, Qt.RightButton, Qt.NoModifier)
+release = QMouseEvent(QEvent.MouseButtonRelease, QPointF(100, 100), Qt.RightButton, Qt.NoButton, Qt.NoModifier)
+app.sendEvent(plotter.plot_widget.viewport(), press)
+app.sendEvent(plotter.plot_widget.viewport(), release)
+print("Right-click context menu completely disabled on plotter verified!", flush=True)
+
 plotter.close()
 app.quit()
 print("ALL PLOTTER TESTS PASSED PERFECTLY!", flush=True)

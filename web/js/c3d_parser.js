@@ -255,14 +255,17 @@ export class C3DParser {
                 if (Array.isArray(evTimes)) {
                     time = evTimes[i * 2] !== undefined ? evTimes[i * 2] : (evTimes[i] || 0.0);
                 }
-                const frame = Math.max(0, Math.round(time * pointRate));
+                const rawFrame = Math.max(0, Math.round(time * pointRate));
+                const frame = (firstFrame > 1 && rawFrame >= (firstFrame - 1)) ? (rawFrame - (firstFrame - 1)) : rawFrame;
+                const clampedFrame = Math.max(0, Math.min(pointFrameCount - 1, frame));
+                const relTime = pointRate > 0 ? clampedFrame / pointRate : 0.0;
                 const color = C3DParser.getEventColor(name, context);
                 events.push({
                     name,
                     context,
-                    time,
-                    frame, // 0-based frame index relative to trial
-                    displayFrame: frame + 1, // 1-based frame for display
+                    time: relTime,
+                    frame: clampedFrame, // 0-based frame index relative to trial
+                    displayFrame: clampedFrame + 1, // 1-based frame for display
                     iconColor: color
                 });
             }
@@ -275,7 +278,7 @@ export class C3DParser {
             if (evHeaderCount > 0 && evHeaderCount <= 18) {
                 let timeOffset = 304;
                 let flagOffset = 376;
-                let labelOffset = 394;
+                let labelOffset = 396;
                 for (let i = 0; i < evHeaderCount; i++) {
                     const time = view.getFloat32(timeOffset + i * 4, littleEndian);
                     let lbl = '';
@@ -284,14 +287,21 @@ export class C3DParser {
                         if (code > 32) lbl += String.fromCharCode(code);
                     }
                     lbl = lbl.trim() || `Event_${i + 1}`;
-                    const frame = Math.max(0, Math.round(time * pointRate));
+                    const rawFrame = Math.max(0, Math.round(time * pointRate));
+                    const frame = (firstFrame > 1 && rawFrame >= (firstFrame - 1)) ? (rawFrame - (firstFrame - 1)) : rawFrame;
+                    const clampedFrame = Math.max(0, Math.min(pointFrameCount - 1, frame));
+                    const relTime = pointRate > 0 ? clampedFrame / pointRate : 0.0;
+                    let context = 'General';
+                    const lower = lbl.toLowerCase();
+                    if (lower.startsWith('r') || lower.includes('right')) context = 'Right';
+                    else if (lower.startsWith('l') || lower.includes('left')) context = 'Left';
                     events.push({
                         name: lbl,
-                        context: 'General',
-                        time,
-                        frame,
-                        displayFrame: frame + 1,
-                        iconColor: C3DParser.getEventColor(lbl, 'General')
+                        context,
+                        time: relTime,
+                        frame: clampedFrame,
+                        displayFrame: clampedFrame + 1,
+                        iconColor: C3DParser.getEventColor(lbl, context)
                     });
                 }
             }

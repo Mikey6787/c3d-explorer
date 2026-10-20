@@ -16,8 +16,6 @@ from PySide6.QtCore import QPointF
 from app import MainWindow
 from core.data_models import C3DTrial
 from gui.marker_tools_dialog import MeasureDistanceDialog, MeasureAngleDialog, compute_distance_trajectory, compute_angle_trajectory
-from gui.measurement_plot_window import MeasurementPlotWindow
-from gui.plot_panel import PlotPanel
 from gui.plotter_window import UniversalPlotterWindow
 
 print("Starting ROI plotting and stats verification...", flush=True)
@@ -105,106 +103,26 @@ assert "Mean: 90.0°" in angle_stats, f"Expected 90.0° in angle stats, got: {an
 print("MeasureAngleDialog stats strictly inside trimmed ROI verified!")
 
 # -------------------------------------------------------------
-# 3. Test MeasurementPlotWindow Highlighting & ROI Stats
+# 3. Test Distance Trajectory Computation & Slicing
 # -------------------------------------------------------------
 dist_traj = compute_distance_trajectory(m1_data, m2_data)
-plot_win = MeasurementPlotWindow(
-    title="Distance: M1 ↔ M2",
-    y_data=dist_traj,
-    point_rate=rate,
-    unit="mm",
-    curve_type="Distance",
-    current_frame=25,
-    trim_range=(trim_start, trim_end)
-)
-plot_win.show()
-
-# Verify stats chip
-chip_text = plot_win.lbl_stats.text()
-assert f"ROI [F{trim_start + 1}–{trim_end + 1}" in chip_text, f"Expected ROI in chip, got {chip_text}"
-assert f"Mean: {exp_mean:.2f}" in chip_text
-assert f"SD: ±{exp_std:.2f}" in chip_text
-assert f"Min: {exp_min:.2f}" in chip_text
-assert f"Max: {exp_max:.2f}" in chip_text
-
-# Verify curve highlight items
-assert plot_win.roi_region.isVisible() is True
-# roi_curve_item data length should match the ROI length (trim_end - trim_start + 1)
-roi_x, roi_y = plot_win.roi_curve_item.getData()
-assert len(roi_y) == (trim_end - trim_start + 1), f"Expected ROI curve length {trim_end - trim_start + 1}, got {len(roi_y)}"
-assert np.allclose(roi_y, expected_slice)
-
-# full_curve_item data outside ROI is dimmed and contains full data
-full_x, full_y = plot_win.full_curve_item.getData()
-assert len(full_y) == n_frames
-
-# Test "Fit ROI" and "Fit Full" in Frame mode (default)
-plot_win.fit_roi()
-view_x_range, _ = plot_win.plot_item.viewRange()
-f_min_expected = float(trim_start + 1)
-f_max_expected = float(trim_end + 1)
-assert view_x_range[0] <= f_min_expected and view_x_range[1] >= f_max_expected
-
-plot_win.auto_range()
-view_full_x, _ = plot_win.plot_item.viewRange()
-assert view_full_x[0] <= 1.0 and view_full_x[1] >= n_frames
-
-# Test dynamic set_trim_range
-plot_win.set_trim_range(5, 15)
-assert plot_win.trim_range == (5, 15)
-assert "ROI [F6–16" in plot_win.lbl_stats.text()
-roi_x_new, roi_y_new = plot_win.roi_curve_item.getData()
-# Test on-curve hover inspection in MeasurementPlotWindow
-pt_scene = plot_win.plot_item.vb.mapViewToScene(QPointF(float(plot_win.x_frames[10]), float(plot_win.y_data[10])))
-plot_win._on_mouse_moved([pt_scene])
-assert plot_win.hover_dot.isVisible(), "hover_dot should be visible when mouse is on curve in MeasurementPlotWindow"
-assert plot_win.hover_label.isVisible(), "hover_label should be visible when mouse is on curve in MeasurementPlotWindow"
-assert f"{plot_win.y_data[10]:.2f}" in plot_win.hover_label.toHtml(), "Value should be in hover label"
-
-# Moving outside plot bounds hides hover items
-plot_win._on_mouse_moved([QPointF(-100, -100)])
-assert not plot_win.hover_dot.isVisible(), "hover_dot should hide outside plot in MeasurementPlotWindow"
-assert not plot_win.hover_label.isVisible(), "hover_label should hide outside plot in MeasurementPlotWindow"
-print("MeasurementPlotWindow on-curve hover inspection verified!")
-
-print("MeasurementPlotWindow ROI highlight, stats, and Fit ROI verified!")
+assert len(dist_traj) == n_frames
+assert np.allclose(dist_traj[trim_start:trim_end + 1], expected_slice)
+print("Distance trajectory computation & ROI slicing verified!")
 
 # -------------------------------------------------------------
-# 4. Test PlotPanel and UniversalPlotterWindow ROI Support
+# 4. Test UniversalPlotterWindow ROI Support
 # -------------------------------------------------------------
-plot_panel = PlotPanel()
-plot_panel.load_trial(trial)
-plot_panel.set_trim_range(15, 60)
-assert plot_panel.trim_range == (15, 60)
-assert plot_panel.roi_region is not None
-assert plot_panel.roi_region.isVisible() is True
-assert "ROI: F16–61" in plot_panel.lbl_roi_status.text()
-plot_panel.fit_roi()
-p_range_x = plot_panel.plot_widget.getViewBox().viewRange()[0]
-assert p_range_x[0] <= 16.0 and p_range_x[1] >= 61.0, f"Expected ROI range in plot_panel, got {p_range_x}"
-print("PlotPanel ROI region and fit_roi verified!")
-
-# Test on-curve hover inspection in PlotPanel
-if len(plot_panel.active_curves) > 0:
-    first_curve = list(plot_panel.active_curves.values())[0]
-    cx, cy = first_curve.getData()
-    pt_scene_panel = plot_panel.plot_widget.getViewBox().mapViewToScene(QPointF(float(cx[10]), float(cy[10])))
-    plot_panel._on_mouse_moved([pt_scene_panel])
-    assert plot_panel.hover_dot.isVisible(), "hover_dot should be visible on curve in PlotPanel"
-    assert plot_panel.hover_label.isVisible(), "hover_label should be visible on curve in PlotPanel"
-    assert f"{cy[10]:.2f}" in plot_panel.hover_label.toHtml(), "Value should be in hover label in PlotPanel"
-
-    plot_panel._on_mouse_moved([QPointF(-100, -100)])
-    assert not plot_panel.hover_dot.isVisible(), "hover_dot should hide outside plot in PlotPanel"
-    assert not plot_panel.hover_label.isVisible(), "hover_label should hide outside plot in PlotPanel"
-    print("PlotPanel on-curve hover inspection verified!")
-
 plotter = UniversalPlotterWindow(trial, current_frame=0)
+plotter.load_trial(trial)
 plotter.set_trim_range(20, 80)
 assert plotter.trim_range == (20, 80)
 assert plotter.roi_region is not None
 assert plotter.roi_region.isVisible() is True
 assert "ROI: F21–81" in plotter.lbl_roi_status.text()
+plotter.fit_roi()
+p_range_x = plotter.plot_widget.getViewBox().viewRange()[0]
+assert p_range_x[0] <= 21.0 and p_range_x[1] >= 81.0
 print("UniversalPlotterWindow ROI region and status badge verified!")
 
 # -------------------------------------------------------------
@@ -212,7 +130,7 @@ print("UniversalPlotterWindow ROI region and status badge verified!")
 # -------------------------------------------------------------
 main_win = MainWindow()
 main_win.trial = trial
-main_win.plot_panel.load_trial(trial)
+main_win.plotter_widget.load_trial(trial)
 main_win.playback.total_frames = n_frames
 main_win.playback.point_rate = rate
 main_win.timeline.set_trial_data(n_frames, rate, [])
@@ -228,22 +146,16 @@ main_win.timeline.set_trim_range(30, 60)
 assert main_win.dist_dialog.trim_range == (30, 60)
 assert "ROI [F31–61]" in main_win.dist_dialog.lbl_stats.text()
 
-# Open measurement plot window and verify it also has (30, 60)
+# Plot measurement and verify it routes directly to plotter_widget
 main_win.show_measurement_plot("Distance Test", dist_traj)
-win_inst = main_win.measurement_plot_windows[-1]
-assert win_inst.trim_range == (30, 60)
-assert "ROI [F31–61" in win_inst.lbl_stats.text()
+assert "Distance Test" in main_win.plotter_widget.active_curves
 
-# Now change timeline trim again to (10, 45) and verify open plot window updates
+# Now change timeline trim again to (10, 45) and verify plotter_widget updates
 main_win.timeline.set_trim_range(10, 45)
-assert win_inst.trim_range == (10, 45)
-assert "ROI [F11–46" in win_inst.lbl_stats.text()
-
-# Verify main_win.plot_panel received updated trim range even while dock is not shown
-assert main_win.plot_panel.trim_range == (10, 45)
-main_win.plot_panel.fit_roi()
-p_range_x2 = main_win.plot_panel.plot_widget.getViewBox().viewRange()[0]
+assert main_win.plotter_widget.trim_range == (10, 45)
+main_win.plotter_widget.fit_roi()
+p_range_x2 = main_win.plotter_widget.plot_widget.getViewBox().viewRange()[0]
 assert p_range_x2[0] <= 11.0 and p_range_x2[1] >= 46.0
 
-print("MainWindow timeline -> dialogs -> plot windows bidirectional ROI synchronization verified!")
+print("MainWindow timeline -> dialogs -> plotter bidirectional ROI synchronization verified!")
 print("ALL ROI PLOTTING AND STATS TESTS PASSED PERFECTLY!")

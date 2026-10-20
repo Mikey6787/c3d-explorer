@@ -32,7 +32,7 @@ for name in theme_names:
     print(f"Successfully applied theme: {name}")
 
 # Revert to default Biomech Dark
-win.apply_theme("Biomech Dark (Obsidian & Cyan)")
+win.apply_theme("Biomech Dark")
 
 # 2. Test Coordinate System Axis Thickness & Visibility
 viewer = win.viewer_3d
@@ -59,7 +59,7 @@ print("Global axes showing verified.")
 
 # 3. Test SettingsDialog UI & collecting settings
 cfg = {
-    "theme": "Clinical Light (Clean Medical White)",
+    "theme": "Clinical Light",
     "show_grid": True,
     "grid_spacing": 1000.0,
     "show_markers": True,
@@ -78,7 +78,7 @@ cfg = {
 dlg = SettingsDialog(cfg, parent=win)
 collected = dlg._collect_settings()
 
-assert collected["theme"] == "Clinical Light (Clean Medical White)"
+assert collected["theme"] == "Clinical Light"
 assert collected["axis_line_width"] == 3.5
 assert collected["axis_length"] == 400.0
 assert collected["show_global_axes"] is True
@@ -90,7 +90,7 @@ print("SettingsDialog configuration collection verified.")
 
 # 4. Test applying settings to MainWindow
 win._apply_settings(collected)
-assert win.current_theme_name == "Clinical Light (Clean Medical White)"
+assert win.current_theme_name == "Clinical Light"
 assert win.viewer_3d.axis_line_width == 3.5
 assert win.viewer_3d.axis_length == 400.0
 assert win.viewer_3d.marker_size == 8.0
@@ -104,13 +104,13 @@ print("MainWindow settings application & Y-Up orientation verified.")
 
 # 5. Test Marker Color auto-switch on Theme change
 # Applying light theme should automatically change default marker color to black
-win.apply_theme("Clinical Light (Clean Medical White)")
+win.apply_theme("Clinical Light")
 assert win.viewer_3d.marker_color == (0.0, 0.0, 0.0, 1.0), f"Expected black marker color on light theme, got {win.viewer_3d.marker_color}"
 assert win.side_panel.default_marker_color.name().upper() == "#000000"
 print("Light theme auto-switch marker to black verified.")
 
 # Applying dark theme should revert black markers back to white
-win.apply_theme("Biomech Dark (Obsidian & Cyan)")
+win.apply_theme("Biomech Dark")
 assert win.viewer_3d.marker_color == (1.0, 1.0, 1.0, 1.0), f"Expected white marker color on dark theme, got {win.viewer_3d.marker_color}"
 assert win.side_panel.default_marker_color.name().upper() == "#FFFFFF"
 print("Dark theme auto-revert marker to white verified.")
@@ -118,7 +118,7 @@ print("Dark theme auto-revert marker to white verified.")
 # 6. Test SettingsDialog marker color picker and theme interaction
 from PySide6.QtGui import QColor
 
-dlg_custom = SettingsDialog({"theme": "Biomech Dark (Obsidian & Cyan)"}, parent=win)
+dlg_custom = SettingsDialog({"theme": "Biomech Dark"}, parent=win)
 # Test custom color setting
 custom_purple = QColor(180, 50, 220)
 dlg_custom._set_marker_color(custom_purple)
@@ -144,7 +144,7 @@ assert abs(collected_custom["grf_color"][0] - custom_teal.redF()) < 1e-3
 print("SettingsDialog GRF custom color picker verified.")
 
 # Test dialog theme change to light theme auto-switches marker to black
-dlg_custom.combo_theme.setCurrentText("Clinical Light (Clean Medical White)")
+dlg_custom.combo_theme.setCurrentText("Clinical Light")
 assert dlg_custom._marker_color_rgba[:3] == (0.0, 0.0, 0.0)
 assert dlg_custom.combo_marker_color.currentText() == "Pitch Black"
 print("SettingsDialog theme change to light auto-switches marker to black verified.")
@@ -174,7 +174,7 @@ print("open_settings_dialog(1) executed successfully.")
 
 # 8. Test settings persistence across application restarts
 persist_test_cfg = {
-    "theme": "Nordic Midnight (Arctic Deep Blue)",
+    "theme": "Nordic Midnight",
     "marker_size": 14.0,
     "axis_line_width": 4.0,
     "z_up": False,
@@ -191,7 +191,7 @@ print("Saved settings to QSettings verified.")
 
 # Create a second MainWindow instance simulating user launching the app next time
 win2 = MainWindow()
-assert win2.current_theme_name == "Nordic Midnight (Arctic Deep Blue)", f"Expected Nordic Midnight, got {win2.current_theme_name}"
+assert win2.current_theme_name == "Nordic Midnight", f"Expected Nordic Midnight, got {win2.current_theme_name}"
 assert win2.viewer_3d.marker_size == 14.0
 assert win2.viewer_3d.axis_line_width == 4.0
 assert win2.viewer_3d.z_up is False

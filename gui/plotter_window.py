@@ -1,6 +1,6 @@
 """Universal Biomechanics Plotter window for plotting markers, forces, and analog signals."""
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QObject, QEvent, QPointF
 from PySide6.QtGui import QColor, QFont, QKeySequence, QIcon, QAction
@@ -14,6 +14,10 @@ import pyqtgraph as pg
 import pyqtgraph.exporters
 
 from core.data_models import C3DTrial
+
+# Prevent pyqtgraph AttributeError: 'ScatterPlotItem' object has no attribute 'setAlpha'
+if not hasattr(pg.ScatterPlotItem, "setAlpha"):
+    pg.ScatterPlotItem.setAlpha = lambda self, alpha, auto=False: None
 
 
 class PlotAxisZoomFilter(QObject):
@@ -81,6 +85,10 @@ class PlotAxisZoomFilter(QObject):
                 vb.setYRange(new_ymin, new_ymax, padding=0.0)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.ContextMenu:
+            event.accept()
+            return True
+
         vb_rect = self.view_box.mapRectToScene(self.view_box.rect())
         axis_b_rect = self.axis_bottom.mapRectToScene(self.axis_bottom.rect())
         axis_l_rect = self.axis_left.mapRectToScene(self.axis_left.rect())
@@ -218,10 +226,18 @@ def enable_axis_wheel_zoom(plot_widget: pg.PlotWidget) -> PlotAxisZoomFilter:
     or scrolling on the Y-axis zooms only vertically.
     Also provides hover indicators and tooltips on both axes.
     """
+    plot_widget.setContextMenuPolicy(Qt.NoContextMenu)
+    plot_item = plot_widget.getPlotItem()
+    plot_item.setMenuEnabled(False)
+    plot_item.ctrlMenu = None
+    plot_item.contextMenuEvent = lambda ev: ev.accept()
+    vb = plot_item.getViewBox()
+    vb.setMenuEnabled(False)
+    vb.menu = None
+    vb.raiseContextMenu = lambda ev: None
+
     filt = PlotAxisZoomFilter(plot_widget)
     plot_widget.viewport().installEventFilter(filt)
-
-    plot_item = plot_widget.getPlotItem()
     axis_b = plot_item.getAxis("bottom")
     axis_l = plot_item.getAxis("left")
 
@@ -297,7 +313,7 @@ PLOT_COLORS = [
 ]
 
 
-class UniversalPlotterWindow(QMainWindow):
+class UniversalPlotter(QWidget):
     """
     Dedicated biomechanics signal and trajectory plotter.
     Allows plotting:
@@ -308,6 +324,7 @@ class UniversalPlotterWindow(QMainWindow):
     - All analog channels (EMG, transducers)
     - Custom signals (distances, angles)
     Supports switching between Time (s) and Frame index on the horizontal axis.
+    Can be used standalone or embedded in a QDockWidget (dockable/detachable panel).
     """
     timeCursorMoved = Signal(float)       # Emitted when user drags cursor on plot
     trimRangeChanged = Signal(int, int)   # Emitted when user drags ROI bounds on plot
@@ -323,6 +340,7 @@ class UniversalPlotterWindow(QMainWindow):
         self.trim_range: Optional[Tuple[int, int]] = None
         self.roi_region: Optional[pg.LinearRegionItem] = None
         self.event_lines: List[pg.InfiniteLine] = []
+        self.dock_widget: Optional[QWidget] = None
 
         # Signal storage: item_id -> {"x": np.ndarray, "y": np.ndarray, "label": str, "unit": str, "rate": float, "subsamples": int}
         self.active_curves: Dict[str, pg.PlotDataItem] = {}
@@ -335,9 +353,7 @@ class UniversalPlotterWindow(QMainWindow):
             self.load_trial(self.trial)
 
     def _setup_ui(self):
-        central = QWidget(self)
-        self.setCentralWidget(central)
-        layout = QVBoxLayout(central)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
@@ -346,7 +362,6 @@ class UniversalPlotterWindow(QMainWindow):
         top_bar.setSpacing(12)
 
         # X-Axis Mode Radio Buttons
-        x_group = QGroupBox("Horizontal Axis (X):") if False else None
         top_bar.addWidget(QLabel("<b>Horizontal Axis:</b>"))
         self.rb_frame = QRadioButton("Frame Number")
         self.rb_frame.setChecked(True)
@@ -395,6 +410,19 @@ class UniversalPlotterWindow(QMainWindow):
         btn_export_img.clicked.connect(self.export_plot_image)
         top_bar.addWidget(btn_export_img)
 
+        # Dock / Undock toggle button (active when attached to a QDockWidget)
+        self.btn_dock_toggle = QPushButton("Detach Window")
+        self.btn_dock_toggle.setCursor(Qt.PointingHandCursor)
+        self.btn_dock_toggle.setToolTip("Detach Plotter into an independent floating window")
+        self.btn_dock_toggle.setStyleSheet(
+            "QPushButton { font-weight: 600; padding: 4px 10px; border-radius: 4px; "
+            "background-color: #2D3748; color: #E2E8F0; border: 1px solid #4A5568; } "
+            "QPushButton:hover { background-color: #38A169; color: #FFFFFF; border-color: #48BB78; }"
+        )
+        self.btn_dock_toggle.clicked.connect(self._toggle_dock_floating)
+        self.btn_dock_toggle.hide()
+        top_bar.addWidget(self.btn_dock_toggle)
+
         layout.addLayout(top_bar)
 
         # --- Main Splitter (Left: Tree Selector | Right: Plot) ---
@@ -413,6 +441,7 @@ class UniversalPlotterWindow(QMainWindow):
         left_layout.addWidget(self.search_box)
 
         self.tree = QTreeWidget()
+        self.tree.setContextMenuPolicy(Qt.NoContextMenu)
         self.tree.setHeaderLabels(["Available Signals"])
         self.tree.header().setVisible(False)
         self.tree.itemChanged.connect(self._on_tree_item_changed)
@@ -425,6 +454,16 @@ class UniversalPlotterWindow(QMainWindow):
         # Right Panel: PyQtGraph PlotWidget
         pg.setConfigOptions(antialias=False)
         self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setContextMenuPolicy(Qt.NoContextMenu)
+        _pi = self.plot_widget.getPlotItem()
+        _pi.setMenuEnabled(False)
+        _pi.ctrlMenu = None
+        _pi.contextMenuEvent = lambda ev: ev.accept()
+        _vb = _pi.getViewBox()
+        _vb.setMenuEnabled(False)
+        _vb.menu = None
+        _vb.raiseContextMenu = lambda ev: None
+
         self.plot_widget.setBackground("#151720")
         self.plot_widget.showGrid(x=True, y=True, alpha=0.25)
         self.plot_widget.setLabel("bottom", "Frame", units="")
@@ -686,7 +725,7 @@ class UniversalPlotterWindow(QMainWindow):
     # Curve Adding & Removing
     # ---------------------------------------------------------
     def _add_signal(self, label: str, role_data: tuple):
-        if not self.trial:
+        if not self.trial or label in self.active_curves:
             return
 
         kind = role_data[0]
@@ -752,6 +791,12 @@ class UniversalPlotterWindow(QMainWindow):
             rate = self.trial.point_rate if self.trial and self.trial.point_rate > 0 else 100.0
             subsamples = 1
 
+        elif kind == "custom":
+            y_data = role_data[1]
+            unit = role_data[2] if len(role_data) > 2 and role_data[2] else ""
+            rate = self.trial.point_rate if self.trial and self.trial.point_rate > 0 else 100.0
+            subsamples = 1
+
         if y_data is None:
             return
 
@@ -770,6 +815,8 @@ class UniversalPlotterWindow(QMainWindow):
             unit = "mm"
         elif kind == "angle":
             unit = "deg"
+        elif kind == "custom":
+            unit = role_data[2] if len(role_data) > 2 and role_data[2] else ""
 
         # Store data
         self.curve_data[label] = {
@@ -932,6 +979,80 @@ class UniversalPlotterWindow(QMainWindow):
         self.raise_()
         self.activateWindow()
 
+    def plot_analog_channel(self, channel_name: str, clear_others: bool = False):
+        """Immediately activate and plot the requested analog channel in the Universal Plotter."""
+        self.plot_analog_channels([channel_name], clear_others=clear_others)
+
+    def plot_analog_channels(self, channel_names: List[str], clear_others: bool = False):
+        """
+        Immediately activate and plot multiple analog channels in the Universal Plotter.
+        Finds each channel item under the 'Analog Channels' group in the tree,
+        checks it (activating the signal), expands the group, scrolls to the first item,
+        and auto-ranges the plot view.
+        """
+        if not self.trial or not channel_names:
+            return
+
+        if clear_others:
+            self.clear_all_curves()
+
+        if self.search_box.text():
+            self.search_box.clear()
+
+        # Find Analog Channels root in tree
+        analog_root = None
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if "Analog" in item.text(0):
+                analog_root = item
+                break
+
+        if not analog_root:
+            analog_root = QTreeWidgetItem(["Analog Channels"])
+            analog_root.setForeground(0, QColor("#69F0AE"))
+            self.tree.addTopLevelItem(analog_root)
+
+        analog_root.setExpanded(True)
+
+        first_target = None
+        for ch_name in channel_names:
+            if ch_name not in self.trial.analogs:
+                continue
+
+            target_item = None
+            for i in range(analog_root.childCount()):
+                c = analog_root.child(i)
+                role_data = c.data(0, Qt.UserRole)
+                if role_data and role_data[0] == "analog" and role_data[1] == ch_name:
+                    target_item = c
+                    break
+
+            if not target_item:
+                # Create item if not already in tree
+                u = self.trial.analog_units.get(ch_name, "V")
+                target_item = QTreeWidgetItem([f"{ch_name} ({u})"])
+                target_item.setFlags(target_item.flags() | Qt.ItemIsUserCheckable)
+                target_item.setCheckState(0, Qt.Unchecked)
+                target_item.setData(0, Qt.UserRole, ("analog", ch_name, u))
+                analog_root.addChild(target_item)
+
+            if first_target is None:
+                first_target = target_item
+
+            target_item.setCheckState(0, Qt.Checked)
+            lbl = target_item.text(0)
+            role_data = target_item.data(0, Qt.UserRole)
+            if lbl not in self.active_curves:
+                self._add_signal(lbl, role_data)
+
+        if first_target:
+            self.tree.scrollToItem(first_target)
+
+        self.auto_range()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
     def plot_distance(
         self,
         m1: str,
@@ -987,9 +1108,67 @@ class UniversalPlotterWindow(QMainWindow):
             self._add_signal(label, ("distance", m1, m2, dist_data))
 
         self.auto_range()
-        self.show()
+        if self.dock_widget and not self.dock_widget.isVisible():
+            self.dock_widget.show()
+        elif not self.isVisible():
+            self.show()
         self.raise_()
         self.activateWindow()
+
+    def add_custom_curve(self, label: str, y_data: np.ndarray, unit: str = ""):
+        """Add a custom signal (e.g. measured distance, angle, custom curve) and plot it."""
+        cat_name = "Custom & Measurements"
+        cat_root = None
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            if "Custom" in it.text(0) or "Measurements" in it.text(0):
+                cat_root = it
+                break
+
+        if not cat_root:
+            cat_root = QTreeWidgetItem([cat_name])
+            cat_root.setForeground(0, QColor("#E040FB"))
+            self.tree.addTopLevelItem(cat_root)
+
+        cat_root.setExpanded(True)
+
+        target_item = None
+        for i in range(cat_root.childCount()):
+            c = cat_root.child(i)
+            if c.text(0) == label:
+                target_item = c
+                break
+
+        role_data = ("custom", y_data, unit)
+        if not target_item:
+            target_item = QTreeWidgetItem([label])
+            target_item.setFlags(target_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            cat_root.addChild(target_item)
+
+        target_item.setData(0, Qt.UserRole, role_data)
+        target_item.setCheckState(0, Qt.Checked)
+        if label not in self.active_curves:
+            self._add_signal(label, role_data)
+
+        self.auto_range()
+        if self.dock_widget and not self.dock_widget.isVisible():
+            self.dock_widget.show()
+            self.dock_widget.raise_()
+        elif not self.isVisible():
+            self.show()
+            self.raise_()
+
+    def plot_marker(self, marker_name: str, marker_data: Optional[np.ndarray] = None):
+        """Immediately plot marker coordinates (X, Y, Z)."""
+        self.plot_marker_coordinates(marker_name, components=("X", "Y", "Z"), clear_others=False)
+
+    def plot_markers(self, markers: Union[List[str], Dict[str, np.ndarray]]):
+        """Immediately plot multiple markers' coordinates (X, Y, Z)."""
+        if isinstance(markers, dict):
+            names = list(markers.keys())
+        else:
+            names = list(markers)
+        self.plot_markers_coordinates(names, components=("X", "Y", "Z"), clear_others=False)
 
     # ---------------------------------------------------------
     # X-Axis Mode (Time vs Frame)
@@ -1301,14 +1480,65 @@ class UniversalPlotterWindow(QMainWindow):
 
     def showEvent(self, event):
         super().showEvent(event)
-        if self.time_cursor not in self.plot_widget.getPlotItem().items:
-            self.plot_widget.addItem(self.time_cursor)
-        self.time_cursor.show()
-        self.update_frame(self.current_frame)
+        main_win = self.window()
+        if hasattr(main_win, 'timeline') and hasattr(main_win.timeline, 'trim_start_frame'):
+            self.set_trim_range(main_win.timeline.trim_start_frame, main_win.timeline.trim_end_frame)
+        if hasattr(main_win, 'playback') and hasattr(main_win.playback, 'current_frame'):
+            self.update_frame(main_win.playback.current_frame)
+        elif self.time_cursor:
+            if self.time_cursor not in self.plot_widget.getPlotItem().items:
+                self.plot_widget.addItem(self.time_cursor)
+            self.time_cursor.show()
+            self.update_frame(self.current_frame)
+
+    def set_dock_widget(self, dock_widget: Optional[QWidget]):
+        """Attach to a QDockWidget to support dynamic docking/floating status."""
+        self.dock_widget = dock_widget
+        if self.dock_widget is not None:
+            self.btn_dock_toggle.show()
+            self._update_dock_toggle_button(self.dock_widget.isFloating())
+            if hasattr(self.dock_widget, "topLevelChanged"):
+                self.dock_widget.topLevelChanged.connect(self._update_dock_toggle_button)
+        else:
+            self.btn_dock_toggle.hide()
+
+    def _update_dock_toggle_button(self, is_floating: bool):
+        """Update button label and tooltip depending on whether the dock is detached/floating."""
+        if is_floating:
+            self.btn_dock_toggle.setText("Attach to App")
+            self.btn_dock_toggle.setToolTip("Dock Plotter panel back into the main application window")
+        else:
+            self.btn_dock_toggle.setText("Detach Window")
+            self.btn_dock_toggle.setToolTip("Detach Plotter into an independent floating window")
+
+    def _toggle_dock_floating(self):
+        """Toggle floating state of the dock widget."""
+        if self.dock_widget:
+            if not self.dock_widget.isVisible():
+                self.dock_widget.show()
+            if hasattr(self.dock_widget, "isFloating") and hasattr(self.dock_widget, "setFloating"):
+                self.dock_widget.setFloating(not self.dock_widget.isFloating())
+                if self.dock_widget.isFloating():
+                    self.dock_widget.raise_()
+                    self.dock_widget.activateWindow()
 
     # ---------------------------------------------------------
     # Synchronization & Cursor
     # ---------------------------------------------------------
+    def set_frame(self, frame_idx: int):
+        """Update synchronized playback cursor line when trial advances."""
+        self.update_frame(frame_idx)
+
+    def set_current_frame(self, frame_idx: int):
+        """Update synchronized playback cursor line when trial advances."""
+        self.update_frame(frame_idx)
+
+    def set_time(self, time_s: float):
+        """Update cursor using timestamp in seconds."""
+        if self.trial and self.trial.point_rate > 0:
+            frame_idx = int(round(time_s * self.trial.point_rate))
+            self.update_frame(frame_idx)
+
     def update_frame(self, frame_idx: int):
         """Update synchronized playback cursor line when trial advances."""
         self.current_frame = frame_idx
@@ -1478,3 +1708,8 @@ class UniversalPlotterWindow(QMainWindow):
             self.time_cursor.setPen(pg.mkPen(color=accent, width=2, style=Qt.SolidLine))
         except Exception:
             pass
+
+
+# Backward compatibility aliases
+UniversalPlotterWindow = UniversalPlotter
+
