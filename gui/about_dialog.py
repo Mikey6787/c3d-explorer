@@ -1,137 +1,175 @@
-"""About Dialog for C3D Explorer featuring Dr. Mohamadreza Kharazi."""
+"""
+Simple & Brief About Dialog for C3D Explorer.
+Author: Dr. Kharazi (Universität Koblenz)
+Includes LinkedIn, University profile, and 'Buy Me a Coffee' (PayPal donation).
+"""
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QFont, QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QCursor
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QScrollArea, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 )
 
 
 class AboutDialog(QDialog):
-    """Modern, polished About Dialog highlighting Dr. Mohamadreza Kharazi and C3D Explorer."""
+    """Simple, brief, and clean About Dialog."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("About C3D explorer")
-        self.setFixedSize(580, 520)
+        self.setWindowTitle("About C3D Explorer")
+        self.setFixedSize(440, 290)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0F141C;
+                color: #ECEFF4;
+            }
+        """)
 
         self._setup_ui()
 
     def _setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(24, 24, 24, 20)
-        main_layout.setSpacing(16)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(12)
 
-        # ---------------- 1. Header: App Name & Version ----------------
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(12)
-
-        title_vbox = QVBoxLayout()
-        title_vbox.setSpacing(3)
-
-        app_title = QLabel("C3D explorer")
-        app_title.setStyleSheet("font-size: 22px; font-weight: bold; color: #00E5FF; letter-spacing: 0.5px;")
-        title_vbox.addWidget(app_title)
-
-        app_sub = QLabel("Biomechanics Motion Capture Analysis & Visualization Workstation")
-        app_sub.setStyleSheet("font-size: 12px; color: #94A3B8;")
-        title_vbox.addWidget(app_sub)
-
-        header_layout.addLayout(title_vbox)
-        header_layout.addStretch()
-
-        ver_badge = QLabel("v1.0.0")
-        ver_badge.setStyleSheet(
-            "background-color: #1E293B; color: #38BDF8; font-weight: bold; "
-            "padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; font-size: 11px;"
+        # 1. Header: App Name & Version
+        header = QHBoxLayout()
+        app_title = QLabel("C3D Explorer")
+        app_title.setStyleSheet("font-size: 19px; font-weight: bold; color: #00ADB5;")
+        ver_lbl = QLabel("v1.0.0")
+        ver_lbl.setStyleSheet(
+            "font-size: 11px; color: #8F9BB3; font-weight: 600; "
+            "padding: 2px 7px; background-color: #1A2230; border-radius: 4px; border: 1px solid #263346;"
         )
-        header_layout.addWidget(ver_badge, alignment=Qt.AlignTop)
-        main_layout.addLayout(header_layout)
+        header.addWidget(app_title)
+        header.addWidget(ver_lbl)
+        header.addStretch()
+        layout.addLayout(header)
 
-        # Divider line
-        div1 = QFrame()
-        div1.setFrameShape(QFrame.HLine)
-        div1.setStyleSheet("color: #334155; margin: 0px;")
-        main_layout.addWidget(div1)
+        # 2. Author Info
+        author_box = QVBoxLayout()
+        author_box.setSpacing(3)
+        lbl_author = QLabel("Author: <b>Dr. Kharazi</b>")
+        lbl_author.setStyleSheet("font-size: 14px; color: #FFFFFF;")
+        lbl_inst = QLabel("Universität Koblenz, Germany")
+        lbl_inst.setStyleSheet("font-size: 12px; color: #8F9BB3;")
+        author_box.addWidget(lbl_author)
+        author_box.addWidget(lbl_inst)
+        layout.addLayout(author_box)
 
-        # ---------------- 2. Author Profile Card ----------------
-        card = QFrame()
-        card.setStyleSheet(
-            "QFrame { background-color: #161B26; border: 1px solid #28334E; border-radius: 10px; padding: 14px; }"
+        # 3. Links: LinkedIn & University
+        links_layout = QHBoxLayout()
+        links_layout.setSpacing(10)
+
+        btn_linkedin = QPushButton("LinkedIn ↗")
+        btn_linkedin.setCursor(QCursor(Qt.PointingHandCursor))
+        btn_linkedin.setFixedHeight(34)
+        btn_linkedin.setStyleSheet("""
+            QPushButton {
+                background-color: #18202E;
+                color: #38BDF8;
+                border: 1px solid #2B384E;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #212C3F;
+                border-color: #0A66C2;
+                color: #FFFFFF;
+            }
+            QPushButton:pressed {
+                background-color: #131A26;
+            }
+        """)
+        btn_linkedin.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://www.linkedin.com/in/mohamadreza-kharazi/"))
         )
-        card_layout = QVBoxLayout(card)
-        card_layout.setSpacing(8)
-        card_layout.setContentsMargins(12, 12, 12, 12)
 
-        author_name = QLabel("Dr. Mohamadreza Kharazi")
-        author_name.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
-        card_layout.addWidget(author_name)
-
-        author_role = QLabel(
-            "<b>Senior Researcher / Academic Staff</b> (<i>Wissenschaftlicher Mitarbeiter</i>)<br>"
-            "Working Group for Training and Movement Science (<i>AG Trainings- und Bewegungswissenschaft</i>)<br>"
-            "Institute of Sport Science (<i>Institut für Sportwissenschaft</i>)<br>"
-            "Faculty 3: Mathematics / Natural Sciences (<i>Fachbereich 3: Mathematik / Naturwissenschaften</i>)<br>"
-            "<b>Universität Koblenz</b>, Germany"
-        )
-        author_role.setStyleSheet("font-size: 12px; color: #CBD5E1; line-height: 1.4;")
-        author_role.setTextFormat(Qt.RichText)
-        card_layout.addWidget(author_role)
-
-        # Research Fields
-        tags_layout = QHBoxLayout()
-        tags_layout.setSpacing(6)
-        tags = ["Biomechanics", "Motor Control", "OpenSim Modeling", "Gait & Tendon Mechanics"]
-        for tag in tags:
-            tag_lbl = QLabel(tag)
-            tag_lbl.setStyleSheet(
-                "background-color: #1E2738; color: #00ADB5; font-size: 10px; font-weight: bold; "
-                "padding: 2px 7px; border-radius: 4px; border: 1px solid #00ADB5;"
+        btn_uni = QPushButton("Universität Koblenz ↗")
+        btn_uni.setCursor(QCursor(Qt.PointingHandCursor))
+        btn_uni.setFixedHeight(34)
+        btn_uni.setStyleSheet("""
+            QPushButton {
+                background-color: #18202E;
+                color: #ECEFF4;
+                border: 1px solid #2B384E;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #212C3F;
+                border-color: #00ADB5;
+                color: #00ADB5;
+            }
+            QPushButton:pressed {
+                background-color: #131A26;
+            }
+        """)
+        btn_uni.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://www.uni-koblenz.de/de/mathematik-naturwissenschaften/inst_f_sport/personen/dr-mohamadreza-kharazi/")
             )
-            tags_layout.addWidget(tag_lbl)
-        tags_layout.addStretch()
-        card_layout.addLayout(tags_layout)
-
-        main_layout.addWidget(card)
-
-        # ---------------- 3. Contact & Academic Links ----------------
-        contact_layout = QVBoxLayout()
-        contact_layout.setSpacing(5)
-
-        info_lbl = QLabel(
-            "<b>Office:</b> Room N 221, Universitätsstraße 1, 56070 Koblenz, Germany<br>"
-            "<b>Email:</b> <a style='color: #00ADB5; text-decoration: none;' href='mailto:mkharazi@uni-koblenz.de'>mkharazi@uni-koblenz.de</a>  |  "
-            "<b>Phone:</b> +49 261 287-2408<br>"
-            "<b>Profiles:</b> "
-            "<a style='color: #38BDF8;' href='https://www.uni-koblenz.de'>Universität Koblenz</a>  •  "
-            "<a style='color: #38BDF8;' href='https://www.researchgate.net/profile/Mohamadreza-Kharazi'>ResearchGate</a>  •  "
-            "<a style='color: #38BDF8;' href='https://scholar.google.com/citations?user=Mohamadreza+Kharazi'>Google Scholar</a>"
         )
-        info_lbl.setOpenExternalLinks(True)
-        info_lbl.setStyleSheet("font-size: 11px; color: #94A3B8; line-height: 1.5;")
-        contact_layout.addWidget(info_lbl)
-        main_layout.addLayout(contact_layout)
 
-        main_layout.addStretch()
+        links_layout.addWidget(btn_linkedin)
+        links_layout.addWidget(btn_uni)
+        layout.addLayout(links_layout)
 
-        # ---------------- 4. Bottom Close Button ----------------
-        btn_layout = QHBoxLayout()
-        tech_note = QLabel("Powered by <b>PySide6</b>, <b>PyQtGraph</b> & <b>ezc3d</b>")
-        tech_note.setStyleSheet("font-size: 11px; color: #64748B;")
-        btn_layout.addWidget(tech_note)
-        btn_layout.addStretch()
+        # 4. "Buy Me a Coffee" Donate Button (PayPal: mohamadreza.kharazi@live.com)
+        btn_donate = QPushButton("☕  Buy Me a Coffee")
+        btn_donate.setToolTip("Support C3D Explorer development via PayPal")
+        btn_donate.setCursor(QCursor(Qt.PointingHandCursor))
+        btn_donate.setFixedHeight(40)
+        btn_donate.setStyleSheet("""
+            QPushButton {
+                background-color: #FFDD00;
+                color: #000000;
+                font-size: 13px;
+                font-weight: 700;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #FFE633;
+            }
+            QPushButton:pressed {
+                background-color: #E6C700;
+            }
+        """)
+        paypal_url = "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&item_name=Support+C3D+Explorer"
+        btn_donate.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(paypal_url)))
+        layout.addWidget(btn_donate)
 
+        # 5. Footer: Close Button
+        footer = QHBoxLayout()
+        footer.addStretch()
         btn_close = QPushButton("Close")
         btn_close.setDefault(True)
-        btn_close.setFixedWidth(90)
-        btn_close.setStyleSheet(
-            "QPushButton { background-color: #00ADB5; color: white; font-weight: bold; "
-            "padding: 6px 14px; border-radius: 5px; } "
-            "QPushButton:hover { background-color: #00C4CC; }"
-        )
+        btn_close.setFixedWidth(80)
+        btn_close.setFixedHeight(30)
+        btn_close.setStyleSheet("""
+            QPushButton {
+                background-color: #1E2636;
+                color: #ECEFF4;
+                font-size: 11px;
+                font-weight: 600;
+                border: 1px solid #2F3E56;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #283348;
+                color: #FFFFFF;
+            }
+            QPushButton:pressed {
+                background-color: #141B26;
+            }
+        """)
         btn_close.clicked.connect(self.accept)
-        btn_layout.addWidget(btn_close)
-
-        main_layout.addLayout(btn_layout)
+        footer.addWidget(btn_close)
+        layout.addLayout(footer)
