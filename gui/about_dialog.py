@@ -122,27 +122,36 @@ class AboutDialog(QDialog):
         layout.addLayout(links_layout)
 
         # 4. "Buy Me a Coffee" Donate Button (PayPal: mohamadreza.kharazi@live.com)
-        btn_donate = QPushButton("☕  Buy Me a Coffee")
-        btn_donate.setToolTip("Support C3D Explorer development via PayPal")
+        # 4. "Buy Me a Coffee" Donate Button (Coffee Brown with default 5 Euro)
+        btn_donate = QPushButton("☕  Buy Me a Coffee (€5)")
+        btn_donate.setToolTip("Support C3D Explorer development via PayPal (€5.00)")
         btn_donate.setCursor(QCursor(Qt.PointingHandCursor))
         btn_donate.setFixedHeight(40)
         btn_donate.setStyleSheet("""
             QPushButton {
-                background-color: #FFDD00;
-                color: #000000;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #8D5B36, stop:1 #6F4220);
+                color: #FFFFFF;
                 font-size: 13px;
                 font-weight: 700;
                 border-radius: 6px;
-                border: none;
+                border: 1px solid #A46D43;
             }
             QPushButton:hover {
-                background-color: #FFE633;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #9E673E, stop:1 #7D4C27);
+                border: 1px solid #C48555;
             }
             QPushButton:pressed {
-                background-color: #E6C700;
+                background-color: #593317;
+                border: 1px solid #593317;
             }
         """)
-        paypal_url = "https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&item_name=Support+C3D+Explorer"
+        paypal_url = (
+            "https://www.paypal.com/cgi-bin/webscr?cmd=_donations"
+            "&business=mohamadreza.kharazi%40live.com"
+            "&currency_code=EUR"
+            "&amount=5.00"
+            "&item_name=Buy+Me+a+Coffee+-+C3D+Explorer"
+        )
         btn_donate.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(paypal_url)))
         layout.addWidget(btn_donate)
 
