@@ -1,6 +1,11 @@
 # C3D Explorer — Biomechanics & Motion Capture Workstation
 
-A cross-platform desktop application (Windows & macOS) for visualizing, analyzing, and editing C3D motion capture files, built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **ezc3d** (`ezc3d`).
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555555.svg)]()
+[![PySide6](https://img.shields.io/badge/GUI-Qt6%20%2F%20PySide6-41CD52.svg?logo=qt&logoColor=white)](https://wiki.qt.io/Qt_for_Python)
+[![Buy Me a Coffee](https://img.shields.io/badge/☕%20Buy%20Me%20a%20Coffee-Donate%20€5-8D5B36.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&amount=5.00&item_name=Buy+Me+a+Coffee+-+C3D+Explorer)
+
+**C3D Explorer** is a high-performance, open-source biomechanics and motion capture workstation designed for researchers, clinicians, and movement scientists. Built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **ezc3d**, it offers an intuitive, fast, and modern desktop environment for 3D marker animation, multi-channel analog & force plate signal inspection, event detection, marker trajectory filtering, and standard `.c3d` file manipulation without relying on heavy proprietary software.
 
 ---
 
@@ -164,4 +169,22 @@ python run.py /path/to/trial.c3d
 | `Ctrl+P` / `Cmd+P` | Open Universal Signal & Marker Plotter |
 | `Ctrl+E` / `Cmd+E` | Add C3D Event at Current Frame |
 | `Ctrl+Q` / `Cmd+Q` | Quit Application |
+
+---
+
+## Author & Developer
+
+**Dr. Mohamadreza Kharazi**  
+*Researcher in Biomechanics & Movement Science*  
+Universität Koblenz, Germany  
+
+- 🌐 **Google Scholar:** [Mohamadreza Kharazi on Google Scholar](https://scholar.google.com/citations?view_op=search_authors&mauthors=Mohamadreza+Kharazi)
+- 💼 **LinkedIn:** [mohamadreza-kharazi-23575285](https://www.linkedin.com/in/mohamadreza-kharazi-23575285)
+- ☕ **Support the Project:** [Buy Me a Coffee (€5 via PayPal)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&amount=5.00&item_name=Buy+Me+a+Coffee+-+C3D+Explorer)
+
+---
+
+## Contributing & Feedback
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/Mikey6787/c3d-explorer/issues) if you want to contribute or report a bug.
+
 
