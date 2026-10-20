@@ -140,6 +140,10 @@ class C3DWriter:
         end_frame = max(start_frame, min(total_frames - 1, end_frame))
         trim_frames = end_frame - start_frame + 1
 
+        orig_first = trial.first_frame
+        new_first_frame = int(orig_first + start_frame)
+        new_last_frame = int(orig_first + end_frame)
+
         # Check if we have an existing ezc3d handle or trial file
         if trial.btk_handle is not None and isinstance(trial.btk_handle, (ezc3d.c3d, dict)):
             c = copy.deepcopy(trial.btk_handle)
@@ -190,6 +194,22 @@ class C3DWriter:
                     c['parameters']['ANALOG']['LABELS']['value'] = a_names
                 if 'USED' in c['parameters']['ANALOG']:
                     c['parameters']['ANALOG']['USED']['value'] = [num_analogs]
+                if 'UNITS' in c['parameters']['ANALOG']:
+                    c['parameters']['ANALOG']['UNITS']['value'] = [trial.analog_units.get(name, "V") for name in a_names]
+                if 'SCALE' in c['parameters']['ANALOG']:
+                    orig_scales = c['parameters']['ANALOG']['SCALE']['value']
+                    c['parameters']['ANALOG']['SCALE']['value'] = [float(orig_scales[i]) if i < len(orig_scales) else 1.0 for i in range(num_analogs)]
+                if 'OFFSET' in c['parameters']['ANALOG']:
+                    orig_offsets = c['parameters']['ANALOG']['OFFSET']['value']
+                    c['parameters']['ANALOG']['OFFSET']['value'] = [int(orig_offsets[i]) if i < len(orig_offsets) else 0 for i in range(num_analogs)]
+                if 'DESCRIPTIONS' in c['parameters']['ANALOG']:
+                    orig_desc = c['parameters']['ANALOG']['DESCRIPTIONS']['value']
+                    c['parameters']['ANALOG']['DESCRIPTIONS']['value'] = [orig_desc[i] if i < len(orig_desc) else "" for i in range(num_analogs)]
+            if 'analogs' in c.get('header', {}):
+                c['header']['analogs']['used'] = num_analogs
+                c['header']['analogs']['frame_rate'] = float(trial.analog_rate)
+                c['header']['analogs']['first_frame'] = int(new_first_frame * sub - (sub - 1))
+                c['header']['analogs']['last_frame'] = int(new_last_frame * sub)
         elif 'analogs' in c['data'] and c['data']['analogs'].ndim >= 3 and c['data']['analogs'].shape[2] > 0:
             orig_analog_frames = c['data']['analogs'].shape[2]
             actual_end = min(orig_analog_frames, analog_end)

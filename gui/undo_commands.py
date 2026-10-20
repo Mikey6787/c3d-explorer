@@ -455,5 +455,233 @@ class FilterMarkersCommand(QUndoCommand):
         if hasattr(self.mw, 'viewer_3d') and self.mw.viewer_3d:
             self.mw.viewer_3d.set_frame(self.mw.playback.current_frame)
         if hasattr(self.mw, 'plotter_widget') and self.mw.plotter_widget:
-            self.mw.plotter_widget.load_trial(self.trial)
+            if hasattr(self.mw.plotter_widget, "update_data"):
+                self.mw.plotter_widget.update_data()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+
+
+class FilterAnalogChannelCommand(QUndoCommand):
+    """Command to apply/overwrite a filter to an existing analog channel."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        channel_name: str,
+        old_data: np.ndarray,
+        new_data: np.ndarray,
+        analog_dialog: Optional[Any] = None
+    ):
+        super().__init__(f"Filter Analog Channel '{channel_name}'")
+        self.mw = main_window
+        self.trial = trial
+        self.channel_name = channel_name
+        self.old_data = old_data.copy()
+        self.new_data = new_data.copy()
+        self.analog_dialog = analog_dialog
+
+    def redo(self):
+        if not self.trial:
+            return
+        self.trial.analogs[self.channel_name] = self.new_data.copy()
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(
+                f"Overwrote analog channel '{self.channel_name}' with filtered signal",
+                3500
+            )
+
+    def undo(self):
+        if not self.trial:
+            return
+        self.trial.analogs[self.channel_name] = self.old_data.copy()
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(
+                f"Undid filter for analog channel '{self.channel_name}', restored original signal",
+                3500
+            )
+
+    def _refresh(self):
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg and hasattr(dlg, "_populate_channel_table"):
+            dlg._populate_channel_table()
+            dlg._update_filter_preview()
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "update_data"):
+                self.mw.plotter_widget.update_data()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+
+
+class AddAnalogChannelCommand(QUndoCommand):
+    """Command to add a new analog channel (e.g. filtered or imported)."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        channel_name: str,
+        data: np.ndarray,
+        unit: str = "V",
+        analog_dialog: Optional[Any] = None
+    ):
+        super().__init__(f"Add Analog Channel '{channel_name}'")
+        self.mw = main_window
+        self.trial = trial
+        self.channel_name = channel_name
+        self.data = data.copy()
+        self.unit = unit
+        self.analog_dialog = analog_dialog
+
+    def redo(self):
+        if not self.trial:
+            return
+        self.trial.analogs[self.channel_name] = self.data.copy()
+        self.trial.analog_units[self.channel_name] = self.unit
+        self._refresh(is_add=True)
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Added analog channel '{self.channel_name}'", 3500)
+
+    def undo(self):
+        if not self.trial:
+            return
+        self.trial.analogs.pop(self.channel_name, None)
+        self.trial.analog_units.pop(self.channel_name, None)
+        self._refresh(is_add=False)
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Undid adding analog channel '{self.channel_name}'", 3500)
+
+    def _refresh(self, is_add: bool):
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg and hasattr(dlg, "_populate_channel_table"):
+            dlg._populate_channel_table()
+            dlg._populate_filter_channels(self.channel_name if is_add else None)
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "refresh_analogs"):
+                self.mw.plotter_widget.refresh_analogs()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+
+
+class DeleteAnalogChannelsCommand(QUndoCommand):
+    """Command to delete one or more analog channels."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        channel_names: List[str],
+        analog_dialog: Optional[Any] = None
+    ):
+        desc = f"Delete Analog Channel '{channel_names[0]}'" if len(channel_names) == 1 else f"Delete {len(channel_names)} Analog Channels"
+        super().__init__(desc)
+        self.mw = main_window
+        self.trial = trial
+        self.channel_names = list(channel_names)
+        self.deleted_data = {ch: trial.analogs[ch].copy() for ch in channel_names if ch in trial.analogs}
+        self.deleted_units = {ch: trial.analog_units.get(ch, "V") for ch in channel_names}
+        self.analog_dialog = analog_dialog
+
+    def redo(self):
+        if not self.trial:
+            return
+        for ch in self.channel_names:
+            self.trial.analogs.pop(ch, None)
+            self.trial.analog_units.pop(ch, None)
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Deleted {len(self.channel_names)} analog channel(s)", 3500)
+
+    def undo(self):
+        if not self.trial:
+            return
+        for ch, arr in self.deleted_data.items():
+            self.trial.analogs[ch] = arr.copy()
+            self.trial.analog_units[ch] = self.deleted_units.get(ch, "V")
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Restored {len(self.deleted_data)} deleted analog channel(s)", 3500)
+
+    def _refresh(self):
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg and hasattr(dlg, "_populate_channel_table"):
+            dlg._populate_channel_table()
+            dlg._populate_filter_channels()
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "refresh_analogs"):
+                self.mw.plotter_widget.refresh_analogs()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+
+
+class RenameAnalogChannelCommand(QUndoCommand):
+    """Command to rename an analog channel."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        old_name: str,
+        new_name: str,
+        analog_dialog: Optional[Any] = None
+    ):
+        super().__init__(f"Rename Analog Channel '{old_name}' \u2192 '{new_name}'")
+        self.mw = main_window
+        self.trial = trial
+        self.old_name = old_name
+        self.new_name = new_name
+        self.analog_dialog = analog_dialog
+
+    def redo(self):
+        if not self.trial or self.old_name not in self.trial.analogs:
+            return
+        self.trial.analogs[self.new_name] = self.trial.analogs.pop(self.old_name)
+        if self.old_name in self.trial.analog_units:
+            self.trial.analog_units[self.new_name] = self.trial.analog_units.pop(self.old_name)
+        self._refresh(self.new_name)
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Renamed analog channel '{self.old_name}' \u2192 '{self.new_name}'", 3500)
+
+    def undo(self):
+        if not self.trial or self.new_name not in self.trial.analogs:
+            return
+        self.trial.analogs[self.old_name] = self.trial.analogs.pop(self.new_name)
+        if self.new_name in self.trial.analog_units:
+            self.trial.analog_units[self.old_name] = self.trial.analog_units.pop(self.new_name)
+        self._refresh(self.old_name)
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Restored analog channel name '{self.old_name}'", 3500)
+
+    def _refresh(self, active_ch: str):
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg and hasattr(dlg, "_populate_channel_table"):
+            dlg._populate_channel_table()
+            dlg._populate_filter_channels(active_ch)
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "refresh_analogs"):
+                self.mw.plotter_widget.refresh_analogs()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
 

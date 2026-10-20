@@ -12,7 +12,7 @@ import numpy as np
 from scipy import signal
 
 from PySide6.QtCore import Qt, Signal, QPointF
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QAction, QKeySequence, QUndoStack
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QTableWidget,
     QTableWidgetItem, QPushButton, QLabel, QLineEdit, QComboBox,
@@ -23,6 +23,12 @@ from PySide6.QtWidgets import (
 import pyqtgraph as pg
 
 from core.data_models import C3DTrial
+from gui.undo_commands import (
+    FilterAnalogChannelCommand,
+    AddAnalogChannelCommand,
+    DeleteAnalogChannelsCommand,
+    RenameAnalogChannelCommand
+)
 
 
 def _safe_info(parent, title: str, text: str):
@@ -411,9 +417,16 @@ class AnalogToolsDialog(QDialog):
     plotChannelsRequested = Signal(list) # Emitted with list of channel names to activate in Universal Plotter
     plotRequested = Signal(str, np.ndarray)  # Emitted to plot custom/filtered curve
 
-    def __init__(self, trial: C3DTrial, parent=None):
+    def __init__(self, trial: C3DTrial, parent=None, undo_stack: Optional[QUndoStack] = None):
         super().__init__(parent)
         self.trial = trial
+        if undo_stack is not None:
+            self.undo_stack = undo_stack
+        elif parent is not None and hasattr(parent, "undo_stack"):
+            self.undo_stack = parent.undo_stack
+        else:
+            self.undo_stack = QUndoStack(self)
+
         self._preview_curve: Optional[pg.PlotDataItem] = None
         self._raw_curve: Optional[pg.PlotDataItem] = None
 
@@ -442,9 +455,10 @@ class AnalogToolsDialog(QDialog):
 
         main_layout.addWidget(self.tabs)
 
-        # Bottom Bar: Small subtle info on the left, Close button on the right
+        # Bottom Bar: Small subtle info on the left, Undo, Redo, and Close buttons on the right
         bottom_box = QHBoxLayout()
         bottom_box.setContentsMargins(4, 4, 4, 0)
+        bottom_box.setSpacing(8)
 
         self.lbl_footer_info = QLabel()
         self.lbl_footer_info.setStyleSheet("color: #8F9BB3; font-size: 11px; background: transparent; border: none;")
@@ -454,11 +468,96 @@ class AnalogToolsDialog(QDialog):
         bottom_box.addWidget(self.lbl_footer_info)
         bottom_box.addStretch()
 
+        self.btn_undo = QPushButton("↶ Undo")
+        self.btn_undo.setToolTip("Undo last action (Ctrl+Z / Cmd+Z)")
+        self.btn_undo.setFixedWidth(80)
+        self.btn_undo.clicked.connect(self._action_undo)
+
+        self.btn_redo = QPushButton("↷ Redo")
+        self.btn_redo.setToolTip("Redo last undone action (Ctrl+Y / Cmd+Shift+Z)")
+        self.btn_redo.setFixedWidth(80)
+        self.btn_redo.clicked.connect(self._action_redo)
+
         btn_close = QPushButton("Close")
-        btn_close.setFixedWidth(85)
+        btn_close.setFixedWidth(80)
         btn_close.clicked.connect(self.accept)
+
+        bottom_box.addWidget(self.btn_undo)
+        bottom_box.addWidget(self.btn_redo)
         bottom_box.addWidget(btn_close)
         main_layout.addLayout(bottom_box)
+
+        # Dialog-level keyboard shortcuts for Undo / Redo
+        act_undo = QAction(self)
+        act_undo.setShortcut(QKeySequence.Undo)
+        act_undo.triggered.connect(self._action_undo)
+        self.addAction(act_undo)
+
+        act_redo = QAction(self)
+        act_redo.setShortcut(QKeySequence.Redo)
+        act_redo.triggered.connect(self._action_redo)
+        self.addAction(act_redo)
+
+        if self.undo_stack:
+            self.undo_stack.canUndoChanged.connect(self._on_can_undo_changed)
+            self.undo_stack.canRedoChanged.connect(self._on_can_redo_changed)
+        self._update_undo_redo_actions()
+
+    def _on_can_undo_changed(self, can_undo: bool):
+        self._update_undo_redo_actions()
+
+    def _on_can_redo_changed(self, can_redo: bool):
+        self._update_undo_redo_actions()
+
+    def _action_undo(self):
+        try:
+            if self.undo_stack and self.undo_stack.canUndo():
+                self.undo_stack.undo()
+        except Exception:
+            pass
+
+    def _action_redo(self):
+        try:
+            if self.undo_stack and self.undo_stack.canRedo():
+                self.undo_stack.redo()
+        except Exception:
+            pass
+
+    def _update_undo_redo_actions(self):
+        try:
+            if not hasattr(self, "btn_undo") or not hasattr(self, "btn_redo"):
+                return
+            if not self.undo_stack:
+                return
+            can_u = bool(self.undo_stack.canUndo())
+            can_r = bool(self.undo_stack.canRedo())
+            self.btn_undo.setEnabled(can_u)
+            self.btn_redo.setEnabled(can_r)
+            if can_u:
+                self.btn_undo.setToolTip(f"Undo {self.undo_stack.undoText()} (Ctrl+Z / Cmd+Z)")
+            else:
+                self.btn_undo.setToolTip("Undo (Ctrl+Z / Cmd+Z)")
+            if can_r:
+                self.btn_redo.setToolTip(f"Redo {self.undo_stack.redoText()} (Ctrl+Y / Cmd+Shift+Z)")
+            else:
+                self.btn_redo.setToolTip("Redo (Ctrl+Y / Cmd+Shift+Z)")
+        except (RuntimeError, AttributeError):
+            pass
+
+    def closeEvent(self, event):
+        try:
+            if self.undo_stack:
+                try:
+                    self.undo_stack.canUndoChanged.disconnect(self._on_can_undo_changed)
+                except Exception:
+                    pass
+                try:
+                    self.undo_stack.canRedoChanged.disconnect(self._on_can_redo_changed)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     # ---------------------------------------------------------
     # TAB 1: Channel Manager
@@ -611,13 +710,18 @@ class AnalogToolsDialog(QDialog):
             _safe_warning(self, "Rename Channel", f"A channel named '{clean_new}' already exists.")
             return
 
-        # Rename in trial
-        self.trial.analogs[clean_new] = self.trial.analogs.pop(old_name)
-        if old_name in self.trial.analog_units:
-            self.trial.analog_units[clean_new] = self.trial.analog_units.pop(old_name)
-
-        self._populate_channel_table()
-        self._populate_filter_channels(clean_new)
+        # Rename with Undo/Redo command
+        cmd = RenameAnalogChannelCommand(
+            main_window=self.parent(),
+            trial=self.trial,
+            old_name=old_name,
+            new_name=clean_new,
+            analog_dialog=self
+        )
+        if self.undo_stack:
+            self.undo_stack.push(cmd)
+        else:
+            cmd.redo()
         self.analogsChanged.emit()
 
     def _action_delete_channel(self):
@@ -636,25 +740,38 @@ class AnalogToolsDialog(QDialog):
 
         reply = _safe_question(
             self, title,
-            f"{prompt}\nThis action will remove them from the trial.",
+            f"{prompt}\nThis action can be undone.",
             default_yes=True
         )
         if reply == QMessageBox.Yes:
-            for ch in ch_names:
-                self.trial.analogs.pop(ch, None)
-                self.trial.analog_units.pop(ch, None)
-            self._populate_channel_table()
-            self._populate_filter_channels()
+            cmd = DeleteAnalogChannelsCommand(
+                main_window=self.parent(),
+                trial=self.trial,
+                channel_names=ch_names,
+                analog_dialog=self
+            )
+            if self.undo_stack:
+                self.undo_stack.push(cmd)
+            else:
+                cmd.redo()
             self.analogsChanged.emit()
 
     def _action_import_channel(self):
         dlg = ImportAnalogDialog(self.trial, parent=self)
         if dlg.exec() == QDialog.Accepted and dlg.imported_data is not None:
             name = dlg.channel_name
-            self.trial.analogs[name] = dlg.imported_data
-            self.trial.analog_units[name] = dlg.channel_unit
-            self._populate_channel_table()
-            self._populate_filter_channels(name)
+            cmd = AddAnalogChannelCommand(
+                main_window=self.parent(),
+                trial=self.trial,
+                channel_name=name,
+                data=dlg.imported_data,
+                unit=dlg.channel_unit,
+                analog_dialog=self
+            )
+            if self.undo_stack:
+                self.undo_stack.push(cmd)
+            else:
+                cmd.redo()
             self.analogsChanged.emit()
             _safe_info(self, "Import Successful", f"Analog channel '{name}' ({len(dlg.imported_data)} frames) imported successfully.")
 
@@ -1036,10 +1153,19 @@ class AnalogToolsDialog(QDialog):
                 if reply != QMessageBox.Yes:
                     return
 
-            self.trial.analogs[new_name] = filtered
-            self.trial.analog_units[new_name] = self.trial.analog_units.get(ch, "V")
-            self._populate_channel_table()
-            self._populate_filter_channels(new_name)
+            cmd = AddAnalogChannelCommand(
+                main_window=self.parent(),
+                trial=self.trial,
+                channel_name=new_name,
+                data=filtered,
+                unit=self.trial.analog_units.get(ch, "V"),
+                analog_dialog=self
+            )
+            if self.undo_stack:
+                self.undo_stack.push(cmd)
+            else:
+                cmd.redo()
+
             self.analogsChanged.emit()
             _safe_info(self, "Filter Applied", f"Successfully saved processed signal as new channel '{new_name}'.")
 
@@ -1053,8 +1179,19 @@ class AnalogToolsDialog(QDialog):
             if reply != QMessageBox.Yes:
                 return
 
-            self.trial.analogs[ch] = filtered
-            self._populate_channel_table()
-            self._update_filter_preview()
+            old_data = self.trial.analogs[ch].copy()
+            cmd = FilterAnalogChannelCommand(
+                main_window=self.parent(),
+                trial=self.trial,
+                channel_name=ch,
+                old_data=old_data,
+                new_data=filtered,
+                analog_dialog=self
+            )
+            if self.undo_stack:
+                self.undo_stack.push(cmd)
+            else:
+                cmd.redo()
+
             self.analogsChanged.emit()
             _safe_info(self, "Filter Applied", f"Channel '{ch}' successfully updated with filtered signal.")

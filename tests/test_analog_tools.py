@@ -334,11 +334,63 @@ assert "TMP_DELETE_1" not in trial.analogs
 assert "TMP_DELETE_2" not in trial.analogs
 print("Batch deletion of multiple selected channels verified!")
 
+# Test undoing channel deletion
+main_win.analog_dialog._action_undo()
+assert "TMP_DELETE_1" in trial.analogs
+assert "TMP_DELETE_2" in trial.analogs
+print("Undoing channel deletion restores deleted channels verified!")
+
+# Test redoing channel deletion
+main_win.analog_dialog._action_redo()
+assert "TMP_DELETE_1" not in trial.analogs
+assert "TMP_DELETE_2" not in trial.analogs
+print("Redoing channel deletion verified!")
+
+# -------------------------------------------------------------
+# 6b. Test Overwriting Analog Channel with Filter and Undo/Redo
+# -------------------------------------------------------------
+assert "EMG2" in trial.analogs
+orig_emg2 = trial.analogs["EMG2"].copy()
+
+# Switch to Filter tab
+main_win.analog_dialog.tabs.setCurrentIndex(1)
+idx_emg2 = main_win.analog_dialog.combo_filter_ch.findData("EMG2")
+assert idx_emg2 >= 0
+main_win.analog_dialog.combo_filter_ch.setCurrentIndex(idx_emg2)
+
+# Select Butterworth Low-pass, cutoff 10 Hz
+idx_lp = main_win.analog_dialog.combo_filter_type.findText("Butterworth Low-pass")
+main_win.analog_dialog.combo_filter_type.setCurrentIndex(idx_lp)
+main_win.analog_dialog.spin_cutoff.setValue(10.0)
+
+# Set Overwrite mode
+main_win.analog_dialog.rb_overwrite.setChecked(True)
+
+# Apply filter overwrite
+main_win.analog_dialog._apply_filter_to_trial()
+
+# Verify channel data is filtered
+assert not np.array_equal(trial.analogs["EMG2"], orig_emg2), "EMG2 data should be overwritten with filtered data"
+filtered_emg2 = trial.analogs["EMG2"].copy()
+print("Overwriting analog channel with filter verified!")
+
+# Verify Undo restores exact original signal
+assert main_win.undo_stack.canUndo()
+main_win.analog_dialog._action_undo()
+np.testing.assert_array_equal(trial.analogs["EMG2"], orig_emg2)
+print("Undoing analog filter overwrite restores exact raw signal verified!")
+
+# Verify Redo reapplies the filtered signal
+assert main_win.undo_stack.canRedo()
+main_win.analog_dialog._action_redo()
+np.testing.assert_array_equal(trial.analogs["EMG2"], filtered_emg2)
+print("Redoing analog filter overwrite reapplies filtered signal verified!")
+
 main_win.analog_dialog.close()
 main_win.close()
 
 # -------------------------------------------------------------
-# 7. Test C3DWriter Synchronization
+# 7. Test C3DWriter Synchronization with Filtered Analogs
 # -------------------------------------------------------------
 with tempfile.NamedTemporaryFile(suffix=".c3d", delete=False) as tmp:
     tmp_c3d_path = tmp.name
@@ -350,8 +402,28 @@ try:
     assert len(reloaded_trial.analogs) == len(trial.analogs)
     assert "EMG_Filtered_25Hz" in reloaded_trial.analogs
     assert "EMG_RMS_40ms" in reloaded_trial.analogs
+    assert "EMG2" in reloaded_trial.analogs
     assert len(reloaded_trial.analogs["EMG_Filtered_25Hz"]) == trial.analog_frame_count
-    print("C3DWriter analog export synchronization verified via round-trip save and read!")
+
+    # Verify that the exported C3D file contains the exact filtered data for EMG2
+    np.testing.assert_allclose(
+        reloaded_trial.analogs["EMG2"],
+        filtered_emg2,
+        atol=1e-3
+    )
+    print("C3DWriter analog export contains filtered analog signals verified!")
+
+    # Now undo the filter and re-export to verify undone state exports correctly
+    main_win.undo_stack.undo()
+    np.testing.assert_array_equal(trial.analogs["EMG2"], orig_emg2)
+    C3DWriter.save_c3d(trial, tmp_c3d_path)
+    reloaded_undone = C3DReader.read(tmp_c3d_path)
+    np.testing.assert_allclose(
+        reloaded_undone.analogs["EMG2"],
+        orig_emg2,
+        atol=1e-3
+    )
+    print("C3DWriter re-export after undo restores raw signal in C3D file verified!")
 finally:
     if os.path.exists(tmp_c3d_path):
         os.remove(tmp_c3d_path)

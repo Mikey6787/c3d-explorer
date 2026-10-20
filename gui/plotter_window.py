@@ -640,6 +640,60 @@ class UniversalPlotter(QWidget):
         """Rebuild event vertical marker lines on the plot."""
         self._build_event_lines()
 
+    def refresh_analogs(self):
+        """Update the Analog Channels tree branch and redraw active curves without resetting other groups."""
+        if not self.trial:
+            return
+
+        # Find Analog Channels root item
+        analog_root = None
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            if "Analog Channels" in it.text(0):
+                analog_root = it
+                break
+
+        # Record currently active/checked analog channel names from tree
+        checked_analogs = set()
+        if analog_root:
+            for j in range(analog_root.childCount()):
+                c = analog_root.child(j)
+                if c.checkState(0) == Qt.Checked:
+                    role = c.data(0, Qt.UserRole)
+                    if role and role[0] == "analog":
+                        checked_analogs.add(role[1])
+
+        if not self.trial.analogs:
+            if analog_root:
+                idx = self.tree.indexOfTopLevelItem(analog_root)
+                self.tree.takeTopLevelItem(idx)
+            for label in list(self.active_curves.keys()):
+                if label not in self.trial.markers and label not in ("Distance", "Angle"):
+                    self._remove_signal(label)
+            return
+
+        self.tree.blockSignals(True)
+        if analog_root is None:
+            analog_root = QTreeWidgetItem(["Analog Channels"])
+            analog_root.setForeground(0, QColor("#69F0AE"))
+            self.tree.addTopLevelItem(analog_root)
+
+        analog_root.takeChildren()
+        for ch_name in sorted(list(self.trial.analogs.keys())):
+            u = self.trial.analog_units.get(ch_name, "V")
+            c_item = QTreeWidgetItem([f"{ch_name} ({u})"])
+            c_item.setFlags(c_item.flags() | Qt.ItemIsUserCheckable)
+            is_checked = ch_name in checked_analogs
+            c_item.setCheckState(0, Qt.Checked if is_checked else Qt.Unchecked)
+            c_item.setData(0, Qt.UserRole, ("analog", ch_name, u))
+            analog_root.addChild(c_item)
+
+        self.tree.blockSignals(False)
+        analog_root.setExpanded(True)
+
+        # Refresh data on active curves
+        self.update_data()
+
     # ---------------------------------------------------------
     # Tree Interaction & Filter
     # ---------------------------------------------------------
@@ -890,6 +944,31 @@ class UniversalPlotter(QWidget):
         if hasattr(self, "hover_dot"):
             self.hover_dot.hide()
             self.hover_label.hide()
+
+    def update_data(self):
+        """Update existing curves from current trial data (markers, analogs) without clearing selections."""
+        if not self.trial:
+            return
+
+        def find_checked_items(item: QTreeWidgetItem) -> List[Tuple[str, tuple]]:
+            results = []
+            if item.checkState(0) == Qt.Checked:
+                role = item.data(0, Qt.UserRole)
+                if role and role[0] != "marker_parent":
+                    results.append((item.text(0), role))
+            for i in range(item.childCount()):
+                results.extend(find_checked_items(item.child(i)))
+            return results
+
+        checked_items = []
+        for i in range(self.tree.topLevelItemCount()):
+            checked_items.extend(find_checked_items(self.tree.topLevelItem(i)))
+
+        for label, role in checked_items:
+            self._remove_signal(label)
+            self._add_signal(label, role)
+
+        self.auto_range()
 
     # ---------------------------------------------------------
     # Programmatic Marker Plotting

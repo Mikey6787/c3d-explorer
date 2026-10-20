@@ -876,7 +876,10 @@ class MainWindow(QMainWindow):
     def _on_analogs_changed(self):
         """Called when analog channels are modified (renamed, deleted, added, filtered)."""
         if self.trial and hasattr(self, 'plotter_widget'):
-            self.plotter_widget.load_trial(self.trial)
+            if hasattr(self.plotter_widget, 'refresh_analogs'):
+                self.plotter_widget.refresh_analogs()
+            else:
+                self.plotter_widget.load_trial(self.trial)
         self._update_status_stats()
 
     def _on_plot_custom_curve_requested(self, label: str, y_data: np.ndarray):
