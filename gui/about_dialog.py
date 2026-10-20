@@ -17,7 +17,7 @@ class AboutDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("About C3D Explorer")
-        self.setFixedSize(440, 290)
+        self.setFixedSize(450, 290)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         self.setStyleSheet("""
@@ -51,7 +51,7 @@ class AboutDialog(QDialog):
         # 2. Author Info
         author_box = QVBoxLayout()
         author_box.setSpacing(3)
-        lbl_author = QLabel("Author: <b>Dr. Kharazi</b>")
+        lbl_author = QLabel("Author: <b>Dr. Mohamadreza Kharazi</b>")
         lbl_author.setStyleSheet("font-size: 14px; color: #FFFFFF;")
         lbl_inst = QLabel("Universität Koblenz, Germany")
         lbl_inst.setStyleSheet("font-size: 12px; color: #8F9BB3;")
@@ -89,10 +89,10 @@ class AboutDialog(QDialog):
             lambda: QDesktopServices.openUrl(QUrl("https://www.linkedin.com/in/mohamadreza-kharazi-23575285"))
         )
 
-        btn_uni = QPushButton("Universität Koblenz ↗")
-        btn_uni.setCursor(QCursor(Qt.PointingHandCursor))
-        btn_uni.setFixedHeight(34)
-        btn_uni.setStyleSheet("""
+        btn_scholar = QPushButton("Google Scholar ↗")
+        btn_scholar.setCursor(QCursor(Qt.PointingHandCursor))
+        btn_scholar.setFixedHeight(34)
+        btn_scholar.setStyleSheet("""
             QPushButton {
                 background-color: #18202E;
                 color: #ECEFF4;
@@ -104,21 +104,21 @@ class AboutDialog(QDialog):
             }
             QPushButton:hover {
                 background-color: #212C3F;
-                border-color: #00ADB5;
-                color: #00ADB5;
+                border-color: #4285F4;
+                color: #4285F4;
             }
             QPushButton:pressed {
                 background-color: #131A26;
             }
         """)
-        btn_uni.clicked.connect(
+        btn_scholar.clicked.connect(
             lambda: QDesktopServices.openUrl(
-                QUrl("https://www.uni-koblenz.de/de/mathematik-naturwissenschaften/inst_f_sport/personen/dr-mohamadreza-kharazi/")
+                QUrl("https://scholar.google.com/citations?view_op=search_authors&mauthors=Mohamadreza+Kharazi")
             )
         )
 
         links_layout.addWidget(btn_linkedin)
-        links_layout.addWidget(btn_uni)
+        links_layout.addWidget(btn_scholar)
         layout.addLayout(links_layout)
 
         # 4. "Buy Me a Coffee" Donate Button (PayPal: mohamadreza.kharazi@live.com)
