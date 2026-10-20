@@ -86,7 +86,7 @@ class AboutDialog(QDialog):
             }
         """)
         btn_linkedin.clicked.connect(
-            lambda: QDesktopServices.openUrl(QUrl("https://www.linkedin.com/in/mohamadreza-kharazi/"))
+            lambda: QDesktopServices.openUrl(QUrl("https://www.linkedin.com/in/mohamadreza-kharazi-23575285"))
         )
 
         btn_uni = QPushButton("Universität Koblenz ↗")
