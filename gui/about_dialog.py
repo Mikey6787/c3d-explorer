@@ -34,27 +34,25 @@ class AboutDialog(QDialog):
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(12)
 
-        # 1. Header: App Name & Version
+        # 1. Header: App Name & Version (clean, unhighlighted)
         header = QHBoxLayout()
+        header.setSpacing(8)
         app_title = QLabel("C3D Explorer")
-        app_title.setStyleSheet("font-size: 19px; font-weight: bold; color: #00ADB5;")
+        app_title.setStyleSheet("font-size: 17px; font-weight: 600; color: #FFFFFF; background: transparent; border: none;")
         ver_lbl = QLabel("v1.0.0")
-        ver_lbl.setStyleSheet(
-            "font-size: 11px; color: #8F9BB3; font-weight: 600; "
-            "padding: 2px 7px; background-color: #1A2230; border-radius: 4px; border: 1px solid #263346;"
-        )
+        ver_lbl.setStyleSheet("font-size: 12px; color: #94A3B8; background: transparent; border: none;")
         header.addWidget(app_title)
         header.addWidget(ver_lbl)
         header.addStretch()
         layout.addLayout(header)
 
-        # 2. Developer Info
+        # 2. Developer Info (clean normal text, no bold or color highlighting)
         author_box = QVBoxLayout()
         author_box.setSpacing(3)
-        lbl_author = QLabel("Developer: <b>Dr. Mohamadreza Kharazi</b>")
-        lbl_author.setStyleSheet("font-size: 14px; color: #FFFFFF;")
+        lbl_author = QLabel("Developer: Dr. Mohamadreza Kharazi")
+        lbl_author.setStyleSheet("font-size: 13px; color: #E2E8F0; background: transparent; border: none;")
         lbl_inst = QLabel("Universität Koblenz, Germany")
-        lbl_inst.setStyleSheet("font-size: 12px; color: #8F9BB3;")
+        lbl_inst.setStyleSheet("font-size: 13px; color: #94A3B8; background: transparent; border: none;")
         author_box.addWidget(lbl_author)
         author_box.addWidget(lbl_inst)
         layout.addLayout(author_box)
