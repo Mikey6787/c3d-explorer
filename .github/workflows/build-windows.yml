@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to upload assets to (e.g. v1.0.0, or leave blank to build only)'
+        description: 'Release tag to upload assets to (e.g. v1.0.1, or leave blank to build only)'
         required: false
-        default: 'v1.0.0'
+        default: 'v1.0.1'
   push:
     branches: [ main ]
     tags: [ 'v*' ]

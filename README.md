@@ -1,7 +1,7 @@
 # C3D Explorer — Biomechanics & Motion Capture Workstation
 
 [![Website](https://img.shields.io/badge/🌐%20Website-biomech--lab.pages.dev-007ACC.svg)](https://biomech-lab.pages.dev/)
-[![Release](https://img.shields.io/badge/Release-v1.0.0-success.svg)](https://github.com/Mikey6787/c3d-explorer/releases/tag/v1.0.0)
+[![Release](https://img.shields.io/badge/Release-v1.0.1-success.svg)](https://github.com/Mikey6787/c3d-explorer/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555555.svg)]()
 [![PySide6](https://img.shields.io/badge/GUI-Qt6%20%2F%20PySide6-41CD52.svg?logo=qt&logoColor=white)](https://wiki.qt.io/Qt_for_Python)
@@ -136,13 +136,13 @@ Under **`Settings -> Visual Configurations...`**:
 ## Installation & Downloads
 
 ### Download Standalone Packages (No Python Needed)
-Pre-built standalone releases for **macOS** and **Windows** are available on **[GitHub Releases (v1.0.0)](https://github.com/Mikey6787/c3d-explorer/releases/tag/v1.0.0)** and the **[Biomech-Lab Website](https://biomech-lab.pages.dev/)**:
+Pre-built standalone releases for **macOS** and **Windows** are available on **[GitHub Releases](https://github.com/Mikey6787/c3d-explorer/releases)** and the **[Biomech-Lab Website](https://biomech-lab.pages.dev/)**:
 
 | Platform | Package | Description |
 | :--- | :--- | :--- |
-| **macOS** | [**`C3D_Explorer_Mac.dmg`**](https://github.com/Mikey6787/c3d-explorer/releases/download/v1.0.0/C3D_Explorer_Mac.dmg) | Drag-and-drop disk image for macOS. Open the DMG and drag **C3D Explorer** into your Applications folder. |
-| **Windows Installer** | [**`C3D_Explorer_Windows_Setup.exe`**](https://github.com/Mikey6787/c3d-explorer/releases/download/v1.0.0/C3D_Explorer_Windows_Setup.exe) | Setup wizard for Windows 10/11. Installs to `Program Files`, adds Start Menu/Desktop shortcuts, and registers `.c3d` file association. |
-| **Windows Portable** | [**`C3D_Explorer_Windows_Portable.zip`**](https://github.com/Mikey6787/c3d-explorer/releases/download/v1.0.0/C3D_Explorer_Windows_Portable.zip) | Standalone portable archive. Unzip anywhere and run `C3DExplorer.exe` directly without installation. |
+| **macOS** | [**`C3D_Explorer_Mac.dmg`**](https://github.com/Mikey6787/c3d-explorer/releases/latest/download/C3D_Explorer_Mac.dmg) | Drag-and-drop disk image for macOS. Open the DMG and drag **C3D Explorer** into your Applications folder. |
+| **Windows Installer** | [**`C3D_Explorer_Windows_Setup.exe`**](https://github.com/Mikey6787/c3d-explorer/releases/latest/download/C3D_Explorer_Windows_Setup.exe) | Setup wizard for Windows 10/11. Installs to `Program Files`, adds Start Menu/Desktop shortcuts, and registers `.c3d` file association. |
+| **Windows Portable** | [**`C3D_Explorer_Windows_Portable.zip`**](https://github.com/Mikey6787/c3d-explorer/releases/latest/download/C3D_Explorer_Windows_Portable.zip) | Standalone portable archive. Unzip anywhere and run `C3DExplorer.exe` directly without installation. |
 
 ---
 

@@ -28,8 +28,10 @@ def main():
             pass
 
     # Set application identity
+    from core import __version__
     QCoreApplication.setOrganizationName("Biomech")
     QCoreApplication.setApplicationName("C3D explorer")
+    QCoreApplication.setApplicationVersion(__version__)
 
     # High DPI settings
     os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"

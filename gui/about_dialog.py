@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 )
 from core.resource_utils import get_resource_path
+from core import __version__
 
 
 class AboutDialog(QDialog):
@@ -51,7 +52,7 @@ class AboutDialog(QDialog):
             header.addWidget(icon_lbl)
         app_title = QLabel("C3D Explorer")
         app_title.setStyleSheet("font-size: 17px; font-weight: 600; color: #FFFFFF; background: transparent; border: none;")
-        ver_lbl = QLabel("v1.0.0")
+        ver_lbl = QLabel(f"v{__version__}")
         ver_lbl.setStyleSheet("font-size: 12px; color: #94A3B8; background: transparent; border: none;")
         header.addWidget(app_title)
         header.addWidget(ver_lbl)

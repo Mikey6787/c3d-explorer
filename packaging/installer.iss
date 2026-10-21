@@ -2,7 +2,7 @@
 ; Creates a professional Windows Setup Installer with .c3d file association
 
 #define MyAppName "C3D Explorer"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Dr. Mohamadreza Kharazi"
 #define MyAppURL "https://biomech-lab.pages.dev"
 #define MyAppExeName "C3DExplorer.exe"
