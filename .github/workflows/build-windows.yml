@@ -12,6 +12,8 @@ jobs:
   build-windows:
     name: Package Windows .exe & Installer
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
