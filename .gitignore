@@ -9,9 +9,9 @@ __pycache__/
 # Distribution / packaging
 build/
 dist/
+dist_installer/
 *.egg-info/
 *.egg
-*.spec
 
 # Virtual environments
 .env

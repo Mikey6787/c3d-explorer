@@ -3,6 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555555.svg)]()
 [![PySide6](https://img.shields.io/badge/GUI-Qt6%20%2F%20PySide6-41CD52.svg?logo=qt&logoColor=white)](https://wiki.qt.io/Qt_for_Python)
+[![Windows Build](https://github.com/Mikey6787/c3d-explorer/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Mikey6787/c3d-explorer/actions/workflows/build-windows.yml)
 [![Buy Me a Coffee](https://img.shields.io/badge/☕%20Buy%20Me%20a%20Coffee-Donate%20€5-8D5B36.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&amount=5.00&item_name=Buy+Me+a+Coffee+-+C3D+Explorer)
 
 **C3D Explorer** is a high-performance, open-source biomechanics and motion capture workstation designed for researchers, clinicians, and movement scientists. Built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **ezc3d**, it offers an intuitive, fast, and modern desktop environment for 3D marker animation, multi-channel analog & force plate signal inspection, event detection, marker trajectory filtering, and standard `.c3d` file manipulation without relying on heavy proprietary software.
@@ -132,14 +133,25 @@ Under **`Settings -> Visual Configurations...`**:
 
 ## Installation & Running
 
-### Requirements
+### Option A: Windows Installer (No Python Needed)
+For Windows users who do not want to install Python:
+1. Go to **[GitHub Releases](https://github.com/Mikey6787/c3d-explorer/releases)** or **[GitHub Actions](https://github.com/Mikey6787/c3d-explorer/actions)**.
+2. Download `C3D_Explorer_Windows_Setup.exe`.
+3. Run the installer wizard:
+   - Automatically installs to `C:\Program Files\C3D Explorer`
+   - Creates Desktop and Start Menu shortcuts
+   - Associates `.c3d` files so double-clicking any `.c3d` file launches C3D Explorer automatically
+4. Alternatively, download the portable version `C3D_Explorer_Windows_Portable.zip`, unzip anywhere, and run `C3DExplorer.exe`.
+
+### Option B: Run from Source (macOS, Windows, Linux)
+#### Requirements
 - Python 3.10, 3.11, 3.12, or 3.13
 - Dependencies:
   ```bash
-  pip install ezc3d PySide6 pyqtgraph pyopengl numpy
+  pip install -r requirements.txt
   ```
 
-### Launching the Application
+#### Launching the Application
 Run from the project directory:
 ```bash
 python run.py
@@ -148,6 +160,13 @@ Or open a specific file directly:
 ```bash
 python run.py /path/to/trial.c3d
 ```
+
+### Building the Windows `.exe` Locally
+If you are on a Windows machine:
+```cmd
+build_windows.bat
+```
+This generates the standalone binary in `dist\C3DExplorer\C3DExplorer.exe` and the Inno Setup installer in `dist_installer\C3D_Explorer_Windows_Setup.exe`.
 
 ---
 

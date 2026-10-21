@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 from gui.theme import THEMES, get_theme, get_theme_names, DEFAULT_THEME_NAME, create_theme_palette
 
 from core.data_models import C3DTrial, C3DEvent
+from core.resource_utils import get_resource_path
 from core.c3d_reader import C3DReader
 from core.c3d_writer import C3DWriter
 import pyqtgraph as pg
@@ -57,6 +58,14 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("C3D explorer")
         self.resize(1440, 920)
         self.setAcceptDrops(True)
+
+        # Set window icon
+        icon_file = "app.ico" if sys.platform == "win32" else "app.png"
+        icon_path = get_resource_path(os.path.join("assets", "icons", icon_file))
+        if not os.path.exists(icon_path):
+            icon_path = get_resource_path(os.path.join("assets", "icons", "app.png"))
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         self.trial: Optional[C3DTrial] = None
         self.current_file_path: Optional[str] = None
@@ -221,7 +230,7 @@ class MainWindow(QMainWindow):
 
     def _get_tinted_icon(self, icon_name: str, color_hex: str) -> QIcon:
         """Load an icon PNG from assets/icons/ and tint its alpha silhouette with color_hex."""
-        icon_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icons", f"{icon_name}.png")
+        icon_path = get_resource_path(os.path.join("assets", "icons", f"{icon_name}.png"))
         if not os.path.exists(icon_path):
             return QIcon()
         img = QImage(icon_path)
