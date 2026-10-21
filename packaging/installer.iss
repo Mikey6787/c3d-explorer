@@ -21,6 +21,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir={#ProjectDir}\dist_installer
 OutputBaseFilename=C3D_Explorer_Windows_Setup
+SetupIconFile={#ProjectDir}\assets\icons\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern

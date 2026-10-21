@@ -46,6 +46,12 @@ def main():
     app.setApplicationDisplayName("C3D explorer")
     app.setStyleSheet(DARK_THEME_QSS)
 
+    from core.resource_utils import get_resource_path
+    initial_icon = get_resource_path(os.path.join("assets", "icons", "AppIcon-Dark.png"))
+    if os.path.exists(initial_icon):
+        from PySide6.QtGui import QIcon
+        app.setWindowIcon(QIcon(initial_icon))
+
     window = MainWindow()
     window.show()
 

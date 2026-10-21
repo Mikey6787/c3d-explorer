@@ -4,21 +4,28 @@ Author: Dr. Kharazi (Universität Koblenz)
 Includes LinkedIn, University profile, and 'Buy Me a Coffee' (PayPal donation).
 """
 
+import os
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QCursor
+from PySide6.QtGui import QDesktopServices, QCursor, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 )
+from core.resource_utils import get_resource_path
 
 
 class AboutDialog(QDialog):
     """Simple, brief, and clean About Dialog."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, is_dark: bool = True):
         super().__init__(parent)
         self.setWindowTitle("About C3D Explorer")
-        self.setFixedSize(450, 290)
+        self.setFixedSize(460, 300)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        icon_filename = "AppIcon-Dark.png" if is_dark else "AppIcon-Light.png"
+        self.icon_path = get_resource_path(os.path.join("assets", "icons", icon_filename))
+        if os.path.exists(self.icon_path):
+            self.setWindowIcon(QIcon(self.icon_path))
 
         self.setStyleSheet("""
             QDialog {
@@ -34,9 +41,14 @@ class AboutDialog(QDialog):
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(12)
 
-        # 1. Header: App Name & Version (clean, unhighlighted)
+        # 1. Header: App Icon, Name & Version (clean, unhighlighted)
         header = QHBoxLayout()
-        header.setSpacing(8)
+        header.setSpacing(10)
+        if hasattr(self, 'icon_path') and os.path.exists(self.icon_path):
+            icon_lbl = QLabel()
+            icon_lbl.setPixmap(QPixmap(self.icon_path).scaled(34, 34, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            icon_lbl.setStyleSheet("background: transparent; border: none;")
+            header.addWidget(icon_lbl)
         app_title = QLabel("C3D Explorer")
         app_title.setStyleSheet("font-size: 17px; font-weight: 600; color: #FFFFFF; background: transparent; border: none;")
         ver_lbl = QLabel("v1.0.0")

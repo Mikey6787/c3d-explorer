@@ -36,6 +36,10 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller pillow
 
+      - name: Generate multi-resolution Windows app.ico
+        run: |
+          python -c "from PIL import Image; img = Image.open('assets/icons/AppIcon-Dark.png').convert('RGBA'); img.save('assets/icons/app.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+
       - name: Build standalone app with PyInstaller
         run: |
           pyinstaller --clean --distpath dist --workpath build packaging/c3d_explorer.spec

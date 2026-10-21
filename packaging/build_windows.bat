@@ -21,6 +21,10 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 pip install pyinstaller pillow
 
+:: 2.5 Generate multi-resolution Windows app.ico from AppIcon-Dark.png
+echo Generating Windows application icon...
+python -c "from PIL import Image; img=Image.open('assets/icons/AppIcon-Dark.png').convert('RGBA'); img.save('assets/icons/app.ico', format='ICO', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+
 :: 3. Run PyInstaller
 echo [2/3] Building executable with PyInstaller...
 pyinstaller --clean --distpath dist --workpath build packaging\c3d_explorer.spec

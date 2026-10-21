@@ -1383,6 +1383,16 @@ class MainWindow(QMainWindow):
             self.lbl_rates.setStyleSheet(f"color: {'#8C96AB' if is_dark else '#6B7280'}; font-size: 11px;")
         self._update_time_frame_labels_style()
         self._update_playback_icons()
+
+        # Update application & window icon based on theme (dark vs normal/light)
+        icon_filename = "AppIcon-Dark.png" if is_dark else "AppIcon-Light.png"
+        icon_path = get_resource_path(os.path.join("assets", "icons", icon_filename))
+        if os.path.exists(icon_path):
+            theme_icon = QIcon(icon_path)
+            self.setWindowIcon(theme_icon)
+            if app:
+                app.setWindowIcon(theme_icon)
+
         if hasattr(self, 'theme_actions') and theme_name in self.theme_actions:
             self.theme_actions[theme_name].setChecked(True)
         self.status.showMessage(f"Applied theme: {theme_name}", 3000)
@@ -1559,7 +1569,9 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl(url))
 
     def show_about_dialog(self):
-        dlg = AboutDialog(self)
+        theme_dict = get_theme(self.current_theme_name)
+        is_dark = theme_dict.get("is_dark", True)
+        dlg = AboutDialog(self, is_dark=is_dark)
         dlg.exec()
 
     # ---------------------------------------------------------
