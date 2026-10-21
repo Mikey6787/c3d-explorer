@@ -59,14 +59,6 @@ class MainWindow(QMainWindow):
         self.resize(1440, 920)
         self.setAcceptDrops(True)
 
-        # Set window icon
-        icon_file = "app.ico" if sys.platform == "win32" else "app.png"
-        icon_path = get_resource_path(os.path.join("assets", "icons", icon_file))
-        if not os.path.exists(icon_path):
-            icon_path = get_resource_path(os.path.join("assets", "icons", "app.png"))
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
-
         self.trial: Optional[C3DTrial] = None
         self.current_file_path: Optional[str] = None
         self.settings = QSettings("Biomech", "C3D explorer")
@@ -518,6 +510,27 @@ class MainWindow(QMainWindow):
         act_color_marker.triggered.connect(self.side_panel._action_change_marker_color)
         marker_menu.addAction(act_color_marker)
 
+        # ---------------- HELP MENU ----------------
+        help_menu = menubar.addMenu("&Help")
+
+        act_about = QAction("&About C3D explorer...", self)
+        act_about.setStatusTip("About C3D Explorer, developer information, and links")
+        act_about.setMenuRole(QAction.AboutRole)
+        act_about.triggered.connect(self.show_about_dialog)
+        help_menu.addAction(act_about)
+
+        act_website = QAction("🌐 Biomech-Lab Website...", self)
+        act_website.setStatusTip("Visit the official Biomech-Lab website (https://biomech-lab.pages.dev/)")
+        act_website.triggered.connect(lambda: QDesktopServices.openUrl(QUrl("https://biomech-lab.pages.dev/")))
+        help_menu.addAction(act_website)
+
+        help_menu.addSeparator()
+
+        act_help_coffee = QAction("☕ Buy Me a Coffee (€5)...", self)
+        act_help_coffee.setStatusTip("Support C3D Explorer development via PayPal (€5.00)")
+        act_help_coffee.triggered.connect(self.open_donate_url)
+        help_menu.addAction(act_help_coffee)
+
         # ---------------- DONATE MENU ----------------
         donate_menu = menubar.addMenu("☕ &Donate")
 
@@ -525,13 +538,6 @@ class MainWindow(QMainWindow):
         act_coffee.setStatusTip("Support C3D Explorer development via PayPal (€5.00)")
         act_coffee.triggered.connect(self.open_donate_url)
         donate_menu.addAction(act_coffee)
-
-        # On macOS, wire About action to the Application menu
-        act_about = QAction("About C3D explorer", self)
-        act_about.setMenuRole(QAction.AboutRole)
-        act_about.triggered.connect(self.show_about_dialog)
-        if sys.platform == "darwin":
-            menubar.addAction(act_about)
 
         # For platforms with in-window menubar (Windows/Linux), also add a styled corner button
         if not menubar.isNativeMenuBar():

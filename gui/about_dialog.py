@@ -115,6 +115,33 @@ class AboutDialog(QDialog):
             )
         )
 
+        btn_website = QPushButton("🌐 Biomech-Lab ↗")
+        btn_website.setCursor(QCursor(Qt.PointingHandCursor))
+        btn_website.setFixedHeight(34)
+        btn_website.setStyleSheet("""
+            QPushButton {
+                background-color: #18202E;
+                color: #ECEFF4;
+                border: 1px solid #2B384E;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #212C3F;
+                border-color: #4285F4;
+                color: #4285F4;
+            }
+            QPushButton:pressed {
+                background-color: #131A26;
+            }
+        """)
+        btn_website.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl("https://biomech-lab.pages.dev/"))
+        )
+
+        links_layout.addWidget(btn_website)
         links_layout.addWidget(btn_linkedin)
         links_layout.addWidget(btn_scholar)
         layout.addLayout(links_layout)

@@ -4,7 +4,7 @@
 #define MyAppName "C3D Explorer"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "Dr. Mohamadreza Kharazi"
-#define MyAppURL "https://github.com/Mikey6787/c3d-explorer"
+#define MyAppURL "https://biomech-lab.pages.dev"
 #define MyAppExeName "C3DExplorer.exe"
 #define ProjectDir ".."
 
@@ -14,14 +14,13 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-AppSupportURL={#MyAppURL}/issues
-AppUpdatesURL={#MyAppURL}/releases
+AppSupportURL={#MyAppURL}
+AppUpdatesURL={#MyAppURL}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 OutputDir={#ProjectDir}\dist_installer
 OutputBaseFilename=C3D_Explorer_Windows_Setup
-SetupIconFile={#ProjectDir}\assets\icons\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
