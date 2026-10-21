@@ -6,6 +6,7 @@
 #define MyAppPublisher "Dr. Mohamadreza Kharazi"
 #define MyAppURL "https://github.com/Mikey6787/c3d-explorer"
 #define MyAppExeName "C3DExplorer.exe"
+#define ProjectDir ".."
 
 [Setup]
 AppId={{D3F9B732-C3D1-4E8A-9A25-B7D8C61E8921}
@@ -18,9 +19,9 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
-OutputDir=dist_installer
+OutputDir={#ProjectDir}\dist_installer
 OutputBaseFilename=C3D_Explorer_Windows_Setup
-SetupIconFile=assets\icons\app.ico
+SetupIconFile={#ProjectDir}\assets\icons\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -37,7 +38,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "associate_c3d"; Description: "Associate .c3d motion capture files with C3D Explorer"; GroupDescription: "File Associations:"
 
 [Files]
-Source: "dist\C3DExplorer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjectDir}\dist\C3DExplorer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

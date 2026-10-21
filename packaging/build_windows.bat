@@ -3,6 +3,9 @@ echo ========================================================
 echo  Building C3D Explorer Standalone Executable ^& Installer
 echo ========================================================
 
+:: Always navigate to the project root (parent directory of packaging/)
+cd /d "%~dp0.."
+
 :: 1. Check Python installation
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
@@ -20,7 +23,7 @@ pip install pyinstaller pillow
 
 :: 3. Run PyInstaller
 echo [2/3] Building executable with PyInstaller...
-pyinstaller --clean c3d_explorer.spec
+pyinstaller --clean --distpath dist --workpath build packaging\c3d_explorer.spec
 if %errorlevel% neq 0 (
     echo [ERROR] PyInstaller build failed!
     pause
@@ -32,7 +35,7 @@ echo [3/3] Checking for Inno Setup compiler...
 set ISCC="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 if exist %ISCC% (
     echo Compiling Windows Setup Installer...
-    %ISCC% installer.iss
+    %ISCC% packaging\installer.iss
     echo [SUCCESS] Setup installer generated in dist_installer\C3D_Explorer_Windows_Setup.exe
 ) else (
     echo [INFO] Inno Setup 6 not found at default location.

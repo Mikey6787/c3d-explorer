@@ -31,20 +31,20 @@ jobs:
 
       - name: Build standalone app with PyInstaller
         run: |
-          pyinstaller --clean c3d_explorer.spec
+          pyinstaller --clean --distpath dist --workpath build packaging/c3d_explorer.spec
 
       - name: Compile Inno Setup Windows Installer
         run: |
           if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
-            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/installer.iss
           } elseif (Get-Command iscc -ErrorAction SilentlyContinue) {
-            iscc installer.iss
+            iscc packaging/installer.iss
           } else {
             choco install innosetup --no-progress
             if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
-              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/installer.iss
             } else {
-              iscc installer.iss
+              iscc packaging/installer.iss
             }
           }
 

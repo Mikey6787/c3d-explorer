@@ -6,8 +6,12 @@ import sys
 
 block_cipher = None
 
-# Project root directory: PyInstaller defines SPECPATH in globals during spec execution
-project_dir = os.path.abspath(SPECPATH) if 'SPECPATH' in globals() else os.path.abspath('.')
+# Locate project root (one level up from packaging/)
+spec_dir = os.path.abspath(SPECPATH) if 'SPECPATH' in globals() else os.path.abspath('.')
+if os.path.basename(spec_dir) == 'packaging':
+    project_dir = os.path.dirname(spec_dir)
+else:
+    project_dir = spec_dir
 
 # Asset data files to bundle
 datas = [
@@ -35,7 +39,7 @@ hidden_imports = [
 ]
 
 a = Analysis(
-    ['app.py'],
+    [os.path.join(project_dir, 'app.py')],
     pathex=[project_dir],
     binaries=[],
     datas=datas,

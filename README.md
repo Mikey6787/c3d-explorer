@@ -154,17 +154,17 @@ For Windows users who do not want to install Python:
 #### Launching the Application
 Run from the project directory:
 ```bash
-python run.py
+python app.py
 ```
 Or open a specific file directly:
 ```bash
-python run.py /path/to/trial.c3d
+python app.py /path/to/trial.c3d
 ```
 
 ### Building the Windows `.exe` Locally
 If you are on a Windows machine:
 ```cmd
-build_windows.bat
+packaging\build_windows.bat
 ```
 This generates the standalone binary in `dist\C3DExplorer\C3DExplorer.exe` and the Inno Setup installer in `dist_installer\C3D_Explorer_Windows_Setup.exe`.
 

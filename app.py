@@ -2,6 +2,9 @@
 
 import sys
 import os
+
+# Ensure current workspace root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PySide6.QtCore import Qt, QCoreApplication
 from PySide6.QtWidgets import QApplication
 
