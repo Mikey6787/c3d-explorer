@@ -37,9 +37,15 @@ jobs:
         run: |
           if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
             & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          } elseif (Get-Command iscc -ErrorAction SilentlyContinue) {
+            iscc installer.iss
           } else {
             choco install innosetup --no-progress
-            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+            if (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+              & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+            } else {
+              iscc installer.iss
+            }
           }
 
       - name: Create Portable ZIP Archive

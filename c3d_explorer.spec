@@ -6,12 +6,12 @@ import sys
 
 block_cipher = None
 
-# Project root directory
-project_dir = os.path.abspath(os.path.dirname(__file__))
+# Project root directory: PyInstaller defines SPECPATH in globals during spec execution
+project_dir = os.path.abspath(SPECPATH) if 'SPECPATH' in globals() else os.path.abspath('.')
 
 # Asset data files to bundle
 datas = [
-    ('assets', 'assets'),
+    (os.path.join(project_dir, 'assets'), 'assets'),
 ]
 
 # Hidden imports required for dynamic/lazy loaded modules
@@ -52,7 +52,7 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-icon_path = os.path.join('assets', 'icons', 'app.ico')
+icon_path = os.path.join(project_dir, 'assets', 'icons', 'app.ico')
 if not os.path.exists(icon_path):
     icon_path = None
 
