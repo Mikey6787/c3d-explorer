@@ -1,5 +1,7 @@
 # C3D Explorer — Biomechanics & Motion Capture Workstation
 
+[![Website](https://img.shields.io/badge/🌐%20Website-biomech--lab.pages.dev-007ACC.svg)](https://biomech-lab.pages.dev/)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-success.svg)](https://github.com/Mikey6787/c3d-explorer/releases/tag/v1.0.0)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555555.svg)]()
 [![PySide6](https://img.shields.io/badge/GUI-Qt6%20%2F%20PySide6-41CD52.svg?logo=qt&logoColor=white)](https://wiki.qt.io/Qt_for_Python)
@@ -131,19 +133,20 @@ Under **`Settings -> Visual Configurations...`**:
 
 ---
 
-## Installation & Running
+## Installation & Downloads
 
-### Option A: Windows Installer (No Python Needed)
-For Windows users who do not want to install Python:
-1. Go to **[GitHub Releases](https://github.com/Mikey6787/c3d-explorer/releases)** or **[GitHub Actions](https://github.com/Mikey6787/c3d-explorer/actions)**.
-2. Download `C3D_Explorer_Windows_Setup.exe`.
-3. Run the installer wizard:
-   - Automatically installs to `C:\Program Files\C3D Explorer`
-   - Creates Desktop and Start Menu shortcuts
-   - Associates `.c3d` files so double-clicking any `.c3d` file launches C3D Explorer automatically
-4. Alternatively, download the portable version `C3D_Explorer_Windows_Portable.zip`, unzip anywhere, and run `C3DExplorer.exe`.
+### Download Standalone Packages (No Python Needed)
+Pre-built standalone releases for **macOS** and **Windows** are available on **[GitHub Releases (v1.0.0)](https://github.com/Mikey6787/c3d-explorer/releases/tag/v1.0.0)** and the **[Biomech-Lab Website](https://biomech-lab.pages.dev/)**:
 
-### Option B: Run from Source (macOS, Windows, Linux)
+| Platform | Package | Description |
+| :--- | :--- | :--- |
+| **macOS** | [**`C3D_Explorer_Mac.dmg`**](https://github.com/Mikey6787/c3d-explorer/releases/download/v1.0.0/C3D_Explorer_Mac.dmg) | Drag-and-drop disk image for macOS. Open the DMG and drag **C3D Explorer** into your Applications folder. |
+| **Windows Installer** | [**`C3D_Explorer_Windows_Setup.exe`**](https://github.com/Mikey6787/c3d-explorer/releases/download/v1.0.0/C3D_Explorer_Windows_Setup.exe) | Setup wizard for Windows 10/11. Installs to `Program Files`, adds Start Menu/Desktop shortcuts, and registers `.c3d` file association. |
+| **Windows Portable** | [**`C3D_Explorer_Windows_Portable.zip`**](https://github.com/Mikey6787/c3d-explorer/releases/download/v1.0.0/C3D_Explorer_Windows_Portable.zip) | Standalone portable archive. Unzip anywhere and run `C3DExplorer.exe` directly without installation. |
+
+---
+
+### Run from Source (macOS, Windows, Linux)
 #### Requirements
 - Python 3.10, 3.11, 3.12, or 3.13
 - Dependencies:
@@ -156,13 +159,13 @@ Run from the project directory:
 ```bash
 python app.py
 ```
-Or open a specific file directly:
+Or open a specific trial file directly:
 ```bash
 python app.py /path/to/trial.c3d
 ```
 
 ### Building the Windows `.exe` Locally
-If you are on a Windows machine:
+If you are building on a physical Windows machine:
 ```cmd
 packaging\build_windows.bat
 ```
@@ -197,7 +200,8 @@ This generates the standalone binary in `dist\C3DExplorer\C3DExplorer.exe` and t
 *Researcher in Biomechanics & Movement Science*  
 Universität Koblenz, Germany  
 
-- 🌐 **Google Scholar:** [Mohamadreza Kharazi on Google Scholar](https://scholar.google.com/citations?view_op=search_authors&mauthors=Mohamadreza+Kharazi)
+- 🌐 **Biomech-Lab Website:** [biomech-lab.pages.dev](https://biomech-lab.pages.dev/)
+- 🔬 **Google Scholar:** [Mohamadreza Kharazi on Google Scholar](https://scholar.google.com/citations?view_op=search_authors&mauthors=Mohamadreza+Kharazi)
 - 💼 **LinkedIn:** [mohamadreza-kharazi-23575285](https://www.linkedin.com/in/mohamadreza-kharazi-23575285)
 - ☕ **Support the Project:** [Buy Me a Coffee (€5 via PayPal)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&amount=5.00&item_name=Buy+Me+a+Coffee+-+C3D+Explorer)
 
