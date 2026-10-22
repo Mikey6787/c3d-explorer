@@ -539,38 +539,6 @@ class MainWindow(QMainWindow):
         act_help_coffee.triggered.connect(self.open_donate_url)
         help_menu.addAction(act_help_coffee)
 
-        # ---------------- DONATE MENU ----------------
-        donate_menu = menubar.addMenu("☕ &Donate")
-
-        act_coffee = QAction("☕ Buy Me a Coffee (€5)...", self)
-        act_coffee.setStatusTip("Support C3D Explorer development via PayPal (€5.00)")
-        act_coffee.triggered.connect(self.open_donate_url)
-        donate_menu.addAction(act_coffee)
-
-        # For platforms with in-window menubar (Windows/Linux), also add a styled corner button
-        if not menubar.isNativeMenuBar():
-            btn_corner_donate = QPushButton("☕ Buy Me a Coffee")
-            btn_corner_donate.setToolTip("Support C3D Explorer development via PayPal (€5.00)")
-            btn_corner_donate.setCursor(Qt.PointingHandCursor)
-            btn_corner_donate.setStyleSheet("""
-                QPushButton {
-                    background-color: #6F4220;
-                    color: #FFFFFF;
-                    font-weight: 600;
-                    font-size: 11px;
-                    border-radius: 4px;
-                    padding: 3px 10px;
-                    margin: 2px 6px;
-                    border: 1px solid #8D5B36;
-                }
-                QPushButton:hover {
-                    background-color: #8D5B36;
-                    border: 1px solid #A46D43;
-                }
-            """)
-            btn_corner_donate.clicked.connect(self.open_donate_url)
-            menubar.setCornerWidget(btn_corner_donate, Qt.TopRightCorner)
-
         # On macOS, customize and clean the application menu & Edit menu directly in Cocoa
         if sys.platform == "darwin":
             from PySide6.QtCore import QTimer
