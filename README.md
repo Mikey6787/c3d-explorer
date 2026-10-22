@@ -64,7 +64,7 @@
 ### 6. Universal Signal & Marker Plotter
 Under **`Tools -> Plotter...`** (`Ctrl+P` / `Cmd+P`):
 - **Universal Multi-Curve Visualization**: Plot any data contained in the C3D file on a single synchronized chart:
-  - **Individual Markers**: Components (X, Y, Z) and 3D Euclidean Norm ($||M||_2$).
+  - **Individual Markers**: Trajectory components along the X, Y, and Z axes.
   - **Force Platforms**: Ground Reaction Forces ($F_x, F_y, F_z, F_{total}$), Moments ($M_x, M_y, M_z$), Center of Pressure ($COP_x, COP_y, COP_z$).
   - **Analog Channels**: EMG, accelerometers, load cells, and auxiliary transducers.
 - **Time vs. Frame Number Axis**: Toggle instantly between **Time (seconds)** and **Frame Number** on the horizontal axis.

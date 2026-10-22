@@ -32,37 +32,37 @@ markers_node = plotter.tree.topLevelItem(0)
 assert markers_node.childCount() > 0
 m1 = markers_node.child(0)
 print(f"First marker in tree: {m1.text(0)}", flush=True)
-assert m1.childCount() >= 4
+assert m1.childCount() == 3, f"Expected exactly 3 components (X, Y, Z), got {m1.childCount()}"
+assert [m1.child(i).text(0) for i in range(3)] == [f"{m1.text(0)} (X)", f"{m1.text(0)} (Y)", f"{m1.text(0)} (Z)"]
 
 m1_x = m1.child(0)
-m1_norm = m1.child(3)
+m1_y = m1.child(1)
 m1_x.setCheckState(0, Qt.Checked)
-m1_norm.setCheckState(0, Qt.Checked)
+m1_y.setCheckState(0, Qt.Checked)
 assert m1.checkState(0) == Qt.PartiallyChecked
 print(f"Active curves after checking marker: {list(plotter.active_curves.keys())}", flush=True)
 assert len(plotter.active_curves) == 2, f"Expected 2 curves, got {len(plotter.active_curves)}"
 
-# Test checking second marker parent item directly -> plots all 4 components (X, Y, Z, 3D Norm)
+# Test checking second marker parent item directly -> plots all 3 components (X, Y, Z)
 if markers_node.childCount() > 1:
     m2 = markers_node.child(1)
     m2_name = m2.text(0)
     m2.setCheckState(0, Qt.Checked)
-    for j in range(4):
+    for j in range(3):
         assert m2.child(j).checkState(0) == Qt.Checked
     assert f"{m2_name} (X)" in plotter.active_curves
     assert f"{m2_name} (Y)" in plotter.active_curves
     assert f"{m2_name} (Z)" in plotter.active_curves
-    assert f"{m2_name} (3D Norm)" in plotter.active_curves
-    print(f"Checked whole marker {m2_name} -> all 4 components plotted!", flush=True)
+    assert f"{m2_name} (3D Norm)" not in plotter.active_curves
+    print(f"Checked whole marker {m2_name} -> all 3 components (X, Y, Z) plotted without 3D Norm!", flush=True)
 
-    # Uncheck whole marker -> all 4 removed
+    # Uncheck whole marker -> all 3 removed
     m2.setCheckState(0, Qt.Unchecked)
-    for j in range(4):
+    for j in range(3):
         assert m2.child(j).checkState(0) == Qt.Unchecked
     assert f"{m2_name} (X)" not in plotter.active_curves
     assert f"{m2_name} (Y)" not in plotter.active_curves
     assert f"{m2_name} (Z)" not in plotter.active_curves
-    assert f"{m2_name} (3D Norm)" not in plotter.active_curves
     assert len(plotter.active_curves) == 2
 
 # Check force plate signal

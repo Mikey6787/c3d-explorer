@@ -317,7 +317,7 @@ class UniversalPlotter(QWidget):
     """
     Dedicated biomechanics signal and trajectory plotter.
     Allows plotting:
-    - Optical markers (X, Y, Z coordinates and 3D resultant norms)
+    - Optical markers (X, Y, and Z coordinates)
     - Ground reaction forces (Fx, Fy, Fz, Ftotal)
     - Ground reaction moments (Mx, My, Mz)
     - Center of pressure (COPx, COPy, COPz)
@@ -535,8 +535,8 @@ class UniversalPlotter(QWidget):
             m_item.setData(0, Qt.UserRole, ("marker_parent", name))
             markers_root.addChild(m_item)
 
-            # Components: X, Y, Z, 3D Magnitude
-            for comp_name, comp_idx in [("X", 0), ("Y", 1), ("Z", 2), ("3D Norm", -1)]:
+            # Components: X, Y, Z
+            for comp_name, comp_idx in [("X", 0), ("Y", 1), ("Z", 2)]:
                 c_item = QTreeWidgetItem([f"{name} ({comp_name})"])
                 c_item.setFlags(c_item.flags() | Qt.ItemIsUserCheckable)
                 c_item.setCheckState(0, Qt.Unchecked)
@@ -882,7 +882,7 @@ class UniversalPlotter(QWidget):
 
         # Assign color
         if label not in self.color_map:
-            if kind == "marker" and len(role_data) > 3 and role_data[3] in ("X", "Y", "Z", "3D Norm"):
+            if kind == "marker" and len(role_data) > 3 and role_data[3] in ("X", "Y", "Z"):
                 comp_name = role_data[3]
                 is_dark = getattr(self, "is_dark", True)
                 if comp_name == "X":
@@ -891,8 +891,6 @@ class UniversalPlotter(QWidget):
                     self.color_map[label] = "#00E676" if is_dark else "#16A34A"
                 elif comp_name == "Z":
                     self.color_map[label] = "#40C4FF" if is_dark else "#0284C7"
-                else:
-                    self.color_map[label] = "#FFD740" if is_dark else "#D97706"
             elif kind == "distance":
                 self.color_map[label] = "#E040FB" if getattr(self, "is_dark", True) else "#A855F7"
             else:
