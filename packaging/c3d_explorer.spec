@@ -61,7 +61,23 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-icon_path = os.path.join(project_dir, 'assets', 'icons', 'app.ico')
+# Detect version from core/__init__.py
+version = '1.0.1'
+try:
+    with open(os.path.join(project_dir, 'core', '__init__.py'), 'r', encoding='utf-8') as f:
+        for line in f:
+            if line.startswith('__version__'):
+                version = line.split('=')[1].strip().strip('"').strip("'")
+                break
+except Exception:
+    pass
+
+# Select appropriate icon for platform
+if sys.platform == 'darwin':
+    icon_path = os.path.join(project_dir, 'assets', 'icons', 'app.icns')
+else:
+    icon_path = os.path.join(project_dir, 'assets', 'icons', 'app.ico')
+
 if not os.path.exists(icon_path):
     icon_path = None
 
@@ -74,7 +90,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=True if sys.platform != 'darwin' else False,
     console=False,  # Set to False to prevent black terminal window on startup
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -90,7 +106,26 @@ coll = COLLECT(
     a.zipfiles,
     a.datas,
     strip=False,
-    upx=True,
+    upx=True if sys.platform != 'darwin' else False,
     upx_exclude=[],
     name='C3DExplorer',
 )
+
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='C3D Explorer.app',
+        icon=icon_path,
+        bundle_identifier='com.biomech.c3dexplorer',
+        info_plist={
+            'CFBundleDisplayName': 'C3D Explorer',
+            'CFBundleName': 'C3D Explorer',
+            'CFBundlePackageType': 'APPL',
+            'CFBundleSignature': '????',
+            'CFBundleShortVersionString': version,
+            'CFBundleVersion': version,
+            'NSHighResolutionCapable': True,
+            'LSMinimumSystemVersion': '10.15.0',
+            'NSRequiresAquaSystemAppearance': False,
+        }
+    )
