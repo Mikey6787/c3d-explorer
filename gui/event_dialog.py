@@ -4,7 +4,7 @@ from typing import Optional, List
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QFont, QBrush
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
+    QDialog, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
     QLineEdit, QSpinBox, QDoubleSpinBox, QPushButton, QLabel,
     QMessageBox, QColorDialog, QTableWidget, QTableWidgetItem,
     QHeaderView, QAbstractItemView, QMenu
@@ -55,11 +55,30 @@ class EventEditDialog(QDialog):
         form.setLabelAlignment(Qt.AlignRight)
         form.setSpacing(10)
 
-        # 1. Event Name / Label
+        # 1. Event Name / Label (Dedicated Text Field + Presets Selector)
+        label_container = QWidget()
+        label_layout = QVBoxLayout(label_container)
+        label_layout.setContentsMargins(0, 0, 0, 0)
+        label_layout.setSpacing(4)
+
+        input_row = QHBoxLayout()
+        input_row.setSpacing(6)
+
+        # Dedicated text field for entering/renaming any custom event label
+        self.txt_name = QLineEdit()
+        self.txt_label = self.txt_name  # Convenient alias
+        self.txt_name.setPlaceholderText("Enter custom event label (e.g. Foot Strike, Max Flexion, Jump...)")
+        self.txt_name.setClearButtonEnabled(True)
+        self.txt_name.textChanged.connect(self._on_txt_name_changed)
+        input_row.addWidget(self.txt_name, 1)
+
+        # Preset selector combobox for one-click standard templates
         self.combo_name = QComboBox()
         self.combo_name.setEditable(True)
-        self.combo_name.setMinimumWidth(260)
+        self.combo_name.setFixedWidth(135)
+        self.combo_name.setToolTip("Quick Presets: Select a standard biomechanical template")
         self.combo_name.addItems([
+            "Presets...",
             "Foot Strike",
             "Foot Off",
             "Heel Strike",
@@ -69,8 +88,16 @@ class EventEditDialog(QDialog):
             "Start",
             "End"
         ])
-        self.combo_name.currentTextChanged.connect(self._on_name_changed)
-        form.addRow("<b>Event Label:</b>", self.combo_name)
+        self.combo_name.currentTextChanged.connect(self._on_combo_name_changed)
+        input_row.addWidget(self.combo_name)
+
+        label_layout.addLayout(input_row)
+
+        lbl_hint = QLabel("Type any custom label above, or choose from common presets.")
+        lbl_hint.setStyleSheet("font-size: 11px; color: #888888; background: transparent; border: none;")
+        label_layout.addWidget(lbl_hint)
+
+        form.addRow("<b>Event Label:</b>", label_container)
 
         # 2. Context / Leg
         self.combo_context = QComboBox()
@@ -145,12 +172,36 @@ class EventEditDialog(QDialog):
 
         layout.addLayout(btn_box)
 
+    def _on_txt_name_changed(self, text: str):
+        # Keep combo_name in sync for external tests and compatibility
+        self.combo_name.blockSignals(True)
+        idx = self.combo_name.findText(text)
+        if idx >= 0:
+            self.combo_name.setCurrentIndex(idx)
+        else:
+            self.combo_name.setCurrentText(text)
+        if self.combo_name.lineEdit():
+            self.combo_name.lineEdit().setCursorPosition(0)
+        self.combo_name.blockSignals(False)
+        self._on_name_changed(text)
+
+    def _on_combo_name_changed(self, text: str):
+        if text and text != "Presets...":
+            if self.txt_name.text() != text:
+                self.txt_name.setText(text)
+                self.txt_name.setFocus()
+                self.txt_name.selectAll()
+
     def _load_data(self):
         if self.event_to_edit:
             ev = self.event_to_edit
+            self.txt_name.setText(ev.name)
+            self.txt_name.setCursorPosition(0)
+            self.combo_name.blockSignals(True)
             self.combo_name.setCurrentText(ev.name)
             if self.combo_name.lineEdit():
                 self.combo_name.lineEdit().setCursorPosition(0)
+            self.combo_name.blockSignals(False)
             self.combo_context.setCurrentText(ev.context if ev.context else "General")
             if self.combo_context.lineEdit():
                 self.combo_context.lineEdit().setCursorPosition(0)
@@ -163,6 +214,13 @@ class EventEditDialog(QDialog):
                 self._color = QColor(ev.icon_color)
                 self._update_color_button()
         else:
+            self.txt_name.setText("Foot Strike")
+            self.txt_name.selectAll()
+            self.combo_name.blockSignals(True)
+            self.combo_name.setCurrentText("Foot Strike")
+            if self.combo_name.lineEdit():
+                self.combo_name.lineEdit().setCursorPosition(0)
+            self.combo_name.blockSignals(False)
             # Prefill default subject if trial has existing events
             if self.trial and self.trial.events:
                 existing_subjects = [e.subject for e in self.trial.events if e.subject]
@@ -198,7 +256,7 @@ class EventEditDialog(QDialog):
 
     def _auto_pick_color(self):
         ctx = self.combo_context.currentText().strip()
-        lbl = self.combo_name.currentText().strip()
+        lbl = self.txt_name.text().strip() if hasattr(self, 'txt_name') else self.combo_name.currentText().strip()
         hex_col = get_event_color(lbl, ctx)
         self._color = QColor(hex_col)
         self._update_color_button()
@@ -215,15 +273,16 @@ class EventEditDialog(QDialog):
         )
 
     def _on_save(self):
-        lbl = self.combo_name.currentText().strip()
+        lbl = self.txt_name.text().strip()
         if not lbl:
             QMessageBox.warning(self, "Invalid Name", "Please enter an event label.")
+            self.txt_name.setFocus()
             return
         self.accept()
 
     def get_event(self) -> C3DEvent:
         """Construct C3DEvent object from dialog inputs."""
-        lbl = self.combo_name.currentText().strip()
+        lbl = self.txt_name.text().strip()
         ctx = self.combo_context.currentText().strip()
         f = self.spin_frame.value() - 1
         t = self.spin_time.value()

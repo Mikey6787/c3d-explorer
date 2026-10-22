@@ -40,6 +40,13 @@ assert new_ev.description == "Initial right heel strike"
 assert new_ev.event_id == 7
 print("EventEditDialog constructed event correctly!", flush=True)
 
+# Test entering custom event label text directly via txt_name
+custom_dlg = EventEditDialog(trial=trial, current_frame=30)
+custom_dlg.txt_name.setText("Max Knee Flexion at 45deg")
+custom_ev = custom_dlg.get_event()
+assert custom_ev.name == "Max Knee Flexion at 45deg"
+print("EventEditDialog custom name input verified!", flush=True)
+
 # 2. Add event to trial and verify persistence through C3DWriter and C3DReader
 trial.events.append(new_ev)
 trial.events.sort(key=lambda e: e.time)
