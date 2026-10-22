@@ -83,13 +83,6 @@ class AboutDialog(QDialog):
 
         layout.addLayout(header)
 
-    def _open_updater(self):
-        from gui.update_dialog import UpdateDialog
-        parent = self.parent()
-        self.accept()
-        dlg = UpdateDialog(parent, is_dark=self.is_dark)
-        dlg.exec()
-
         # 2. Developer Info (clean normal text, no bold or color highlighting)
         author_box = QVBoxLayout()
         author_box.setSpacing(3)
@@ -251,3 +244,11 @@ class AboutDialog(QDialog):
         btn_close.clicked.connect(self.accept)
         footer.addWidget(btn_close)
         layout.addLayout(footer)
+
+    def _open_updater(self):
+        from gui.update_dialog import UpdateDialog
+        parent = self.parent()
+        self.accept()
+        dlg = UpdateDialog(parent, is_dark=self.is_dark)
+        dlg.exec()
+
