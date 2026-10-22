@@ -247,9 +247,6 @@ class Viewer3D(QWidget):
         # Initialize Default 3D scene elements
         self._init_scene()
 
-        # Floating Preset / Control Overlay Toolbar at top-left
-        self._create_overlay_controls()
-
     def _init_scene(self):
         """Create ground grid, thick global coordinate triad, and marker cloud."""
         # 1. Ground Grid (spacing 500mm, 10x10 meters, placed at low depth)
@@ -384,60 +381,6 @@ class Viewer3D(QWidget):
                 it.setVisible(self.show_global_axes)
                 self.gl_view.addItem(it)
                 self.global_axis_items.append(it)
-
-    def _create_overlay_controls(self):
-        """Build translucent floating control buttons in top-left corner."""
-        overlay = QWidget(self.gl_view)
-        overlay.setAttribute(Qt.WA_NoSystemBackground)
-        overlay.setStyleSheet("""
-            QWidget {
-                background: transparent;
-            }
-            QPushButton, QToolButton {
-                background-color: rgba(28, 32, 46, 0.85);
-                color: #ECEFF4;
-                border: 1px solid rgba(60, 68, 92, 0.8);
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 11px;
-                font-weight: 600;
-            }
-            QPushButton:hover, QToolButton:hover {
-                background-color: rgba(0, 173, 181, 0.9);
-                color: #FFFFFF;
-                border-color: #00ADB5;
-            }
-            QPushButton:pressed, QToolButton:pressed {
-                background-color: #007982;
-            }
-        """)
-
-        ov_layout = QHBoxLayout(overlay)
-        ov_layout.setContentsMargins(10, 10, 10, 10)
-        ov_layout.setSpacing(6)
-
-        btn_fit = QPushButton("Fit View")
-        btn_fit.clicked.connect(self.fit_view_to_data)
-        ov_layout.addWidget(btn_fit)
-
-        btn_iso = QPushButton("3D Iso")
-        btn_iso.clicked.connect(self.set_camera_isometric)
-        ov_layout.addWidget(btn_iso)
-
-        btn_top = QPushButton("Top")
-        btn_top.clicked.connect(self.set_camera_top)
-        ov_layout.addWidget(btn_top)
-
-        btn_front = QPushButton("Front")
-        btn_front.clicked.connect(self.set_camera_front)
-        ov_layout.addWidget(btn_front)
-
-        btn_side = QPushButton("Side")
-        btn_side.clicked.connect(self.set_camera_side)
-        ov_layout.addWidget(btn_side)
-
-        overlay.adjustSize()
-        overlay.move(10, 10)
 
     # ---------------------------------------------------------
     # Camera Presets
