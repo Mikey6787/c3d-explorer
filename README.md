@@ -104,9 +104,10 @@ Under **`Tools -> Events`** (or timeline right-click):
 ### 9. Visual Configurations & Settings
 Under **`Settings -> Visual Configurations...`**:
 - **Display Tab**:
-  - **5 Professional Themes**:
+  - **6 Professional Themes**:
     - `Biomech Dark`: Dark biomechanics workstation theme.
     - `Clinical Light`: Crisp high-contrast clinical laboratory theme.
+    - `Nordic Frost`: Soothing Scandinavian light theme with glacier teal accents.
     - `Nordic Midnight`: Nord frost teal and deep slate theme.
     - `Graphite Slate`: Industrial titanium and safety amber theme.
     - `Cyber Amber`: Deep aerospace navy and vibrant goldenrod theme.

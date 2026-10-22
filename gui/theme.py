@@ -449,6 +449,38 @@ THEMES: Dict[str, Dict[str, Any]] = {
             alternate_bg="#F8FAFC"
         )
     },
+    "Nordic Frost": {
+        "name": "Nordic Frost",
+        "is_dark": False,
+        "accent": "#0D9488",
+        "viewport_bg": "#EBF1F6",
+        "plot_bg": "#FFFFFF",
+        "plot_axis_color": "#2E3440",
+        "grid_color": (160, 180, 205, 110),
+        "qss": build_theme_qss(
+            bg="#ECEFF4",
+            panel_bg="#FFFFFF",
+            card_bg="#F8FAFC",
+            header_bg="#E2E8F0",
+            border="#CBD5E1",
+            border_light="#E2E8F0",
+            text="#2E3440",
+            text_muted="#64748B",
+            text_bright="#0F172A",
+            accent="#0D9488",
+            accent_hover="#0F766E",
+            accent_pressed="#115E59",
+            table_bg="#FFFFFF",
+            table_grid="#E2E8F0",
+            input_bg="#F8FAFC",
+            selection_bg="#0D9488",
+            selection_text="#FFFFFF",
+            scrollbar_bg="#ECEFF4",
+            scrollbar_handle="#CBD5E1",
+            dock_title_bg="#E2E8F0",
+            alternate_bg="#F1F5F9"
+        )
+    },
     "Nordic Midnight": {
         "name": "Nordic Midnight",
         "is_dark": True,

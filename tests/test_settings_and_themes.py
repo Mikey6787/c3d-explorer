@@ -14,10 +14,10 @@ app = QApplication.instance() or QApplication(sys.argv)
 win = MainWindow()
 win.resize(1000, 700)
 
-# 1. Test 5 Themes availability and switching
+# 1. Test 6 Themes availability and switching
 theme_names = get_theme_names()
-assert len(theme_names) == 5, f"Expected 5 themes, got {len(theme_names)}: {theme_names}"
-print(f"5 Built-in themes found: {theme_names}")
+assert len(theme_names) == 6, f"Expected 6 themes, got {len(theme_names)}: {theme_names}"
+print(f"6 Built-in themes found: {theme_names}")
 
 for name in theme_names:
     theme_dict = get_theme(name)
