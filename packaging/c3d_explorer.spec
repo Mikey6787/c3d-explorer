@@ -40,6 +40,7 @@ hidden_imports = [
     'PySide6.QtWidgets',
     'PySide6.QtOpenGL',
     'PySide6.QtOpenGLWidgets',
+    'PySide6.QtNetwork',
 ]
 
 a = Analysis(

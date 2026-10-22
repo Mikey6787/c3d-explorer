@@ -11,6 +11,7 @@ from gui.marker_tools_dialog import (
 from gui.plotter_window import UniversalPlotter, UniversalPlotterWindow
 from gui.event_dialog import EventEditDialog, EventManagerDialog
 from gui.analog_dialog import AnalogToolsDialog
+from gui.update_dialog import UpdateDialog
 from gui.theme import DARK_THEME_QSS
 
 __all__ = [
@@ -29,5 +30,6 @@ __all__ = [
     "EventEditDialog",
     "EventManagerDialog",
     "AnalogToolsDialog",
+    "UpdateDialog",
     "DARK_THEME_QSS"
 ]

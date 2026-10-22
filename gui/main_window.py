@@ -36,6 +36,7 @@ from gui.plotter_window import UniversalPlotter, UniversalPlotterWindow
 from gui.event_dialog import EventEditDialog, EventManagerDialog
 from gui.analog_dialog import AnalogToolsDialog
 from gui.about_dialog import AboutDialog
+from gui.update_dialog import UpdateDialog
 from gui.undo_commands import (
     AddEventCommand, DeleteEventCommand, DeleteEventsCommand, EditEventCommand,
     ClearEventsCommand, EventsBatchCommand, RenameMarkerCommand,
@@ -512,6 +513,13 @@ class MainWindow(QMainWindow):
 
         # ---------------- HELP MENU ----------------
         help_menu = menubar.addMenu("&Help")
+
+        act_check_updates = QAction("Check for Updates...", self)
+        act_check_updates.setStatusTip("Check for the newest C3D Explorer release and download updates")
+        act_check_updates.triggered.connect(self.check_for_updates)
+        help_menu.addAction(act_check_updates)
+
+        help_menu.addSeparator()
 
         act_about = QAction("&About C3D explorer...", self)
         act_about.setStatusTip("About C3D Explorer, developer information, and links")
@@ -1572,6 +1580,13 @@ class MainWindow(QMainWindow):
         theme_dict = get_theme(self.current_theme_name)
         is_dark = theme_dict.get("is_dark", True)
         dlg = AboutDialog(self, is_dark=is_dark)
+        dlg.exec()
+
+    def check_for_updates(self):
+        """Open the interactive Check for Updates dialog."""
+        theme_dict = get_theme(self.current_theme_name)
+        is_dark = theme_dict.get("is_dark", True)
+        dlg = UpdateDialog(self, is_dark=is_dark)
         dlg.exec()
 
     # ---------------------------------------------------------

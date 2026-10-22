@@ -19,8 +19,9 @@ class AboutDialog(QDialog):
 
     def __init__(self, parent=None, is_dark: bool = True):
         super().__init__(parent)
+        self.is_dark = is_dark
         self.setWindowTitle("About C3D Explorer")
-        self.setFixedSize(460, 300)
+        self.setFixedSize(480, 310)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
         icon_filename = "AppIcon-Dark.png" if is_dark else "AppIcon-Light.png"
@@ -57,7 +58,37 @@ class AboutDialog(QDialog):
         header.addWidget(app_title)
         header.addWidget(ver_lbl)
         header.addStretch()
+
+        btn_updates = QPushButton("Check for Updates")
+        btn_updates.setCursor(QCursor(Qt.PointingHandCursor))
+        btn_updates.setFixedHeight(26)
+        btn_updates.setStyleSheet("""
+            QPushButton {
+                background-color: #172030;
+                color: #38BDF8;
+                border: 1px solid #233550;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #0284C7;
+                border-color: #0284C7;
+                color: #FFFFFF;
+            }
+        """)
+        btn_updates.clicked.connect(self._open_updater)
+        header.addWidget(btn_updates)
+
         layout.addLayout(header)
+
+    def _open_updater(self):
+        from gui.update_dialog import UpdateDialog
+        parent = self.parent()
+        self.accept()
+        dlg = UpdateDialog(parent, is_dark=self.is_dark)
+        dlg.exec()
 
         # 2. Developer Info (clean normal text, no bold or color highlighting)
         author_box = QVBoxLayout()
