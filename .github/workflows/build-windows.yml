@@ -84,6 +84,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || github.event.inputs.release_tag }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || github.event.inputs.release_tag }}
+          body_path: RELEASE_NOTES.md
           files: |
             dist_installer/C3D_Explorer_Windows_Setup.exe
             dist_installer/C3D_Explorer_Windows_Portable.zip

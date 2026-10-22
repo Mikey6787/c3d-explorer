@@ -89,15 +89,24 @@ class UpdateDialog(QDialog):
                 QDialog {
                     background-color: #0F141C;
                     color: #ECEFF4;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    font-family: "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+                }
+                QStackedWidget, QStackedWidget > QWidget {
+                    background: transparent;
                 }
                 QLabel {
+                    background: transparent;
                     color: #ECEFF4;
+                    border: none;
                 }
                 QFrame#card {
                     background-color: #171E2B;
                     border: 1px solid #28354A;
                     border-radius: 8px;
+                }
+                QFrame#card QLabel {
+                    background: transparent;
+                    border: none;
                 }
                 QTextBrowser {
                     background-color: #121722;
@@ -156,15 +165,24 @@ class UpdateDialog(QDialog):
                 QDialog {
                     background-color: #F8FAFC;
                     color: #1E293B;
-                    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                    font-family: "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+                }
+                QStackedWidget, QStackedWidget > QWidget {
+                    background: transparent;
                 }
                 QLabel {
+                    background: transparent;
                     color: #1E293B;
+                    border: none;
                 }
                 QFrame#card {
                     background-color: #FFFFFF;
                     border: 1px solid #E2E8F0;
                     border-radius: 8px;
+                }
+                QFrame#card QLabel {
+                    background: transparent;
+                    border: none;
                 }
                 QTextBrowser {
                     background-color: #FFFFFF;
@@ -235,9 +253,9 @@ class UpdateDialog(QDialog):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         lbl_title = QLabel("C3D Explorer Updater")
-        lbl_title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        lbl_title.setStyleSheet("background: transparent; border: none; font-size: 16px; font-weight: 700;")
         self.lbl_subtitle = QLabel(f"Current version installed: v{__version__}")
-        self.lbl_subtitle.setStyleSheet(f"font-size: 12px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
+        self.lbl_subtitle.setStyleSheet(f"background: transparent; border: none; font-size: 12px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
         title_box.addWidget(lbl_title)
         title_box.addWidget(self.lbl_subtitle)
         header.addLayout(title_box)
@@ -288,7 +306,7 @@ class UpdateDialog(QDialog):
         card_layout.setSpacing(12)
 
         lbl = QLabel("Checking GitHub for the latest release...")
-        lbl.setStyleSheet("font-size: 13px; font-weight: 500;")
+        lbl.setStyleSheet("background: transparent; border: none; font-size: 13px; font-weight: 500;")
         lbl.setAlignment(Qt.AlignCenter)
         card_layout.addWidget(lbl)
 
@@ -327,10 +345,10 @@ class UpdateDialog(QDialog):
         card_layout.addLayout(badge_box)
 
         lbl_msg = QLabel(f"You are running the newest version of C3D Explorer (v{__version__}).")
-        lbl_msg.setStyleSheet("font-size: 13px; font-weight: 600; margin-top: 4px;")
+        lbl_msg.setStyleSheet("background: transparent; border: none; font-size: 13px; font-weight: 600; margin-top: 4px;")
         lbl_desc = QLabel("No new updates are required. Your installation has all the latest signal filtering tools, 3D viewport improvements, and biomechanics measurement capabilities.")
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet(f"font-size: 12px; color: {'#94A3B8' if self.is_dark else '#64748B'}; line-height: 1.4;")
+        lbl_desc.setStyleSheet(f"background: transparent; border: none; font-size: 12px; color: {'#94A3B8' if self.is_dark else '#64748B'}; line-height: 1.4;")
 
         card_layout.addWidget(lbl_msg)
         card_layout.addWidget(lbl_desc)
@@ -376,21 +394,21 @@ class UpdateDialog(QDialog):
             border-radius: 10px;
         """)
         self.lbl_avail_version = QLabel("v1.0.2")
-        self.lbl_avail_version.setStyleSheet("font-size: 14px; font-weight: 700;")
+        self.lbl_avail_version.setStyleSheet("background: transparent; border: none; font-size: 14px; font-weight: 700;")
         top_row.addWidget(self.lbl_avail_badge)
         top_row.addWidget(self.lbl_avail_version)
         top_row.addStretch()
         card_layout.addLayout(top_row)
 
         self.lbl_avail_details = QLabel("A new version is available for download.")
-        self.lbl_avail_details.setStyleSheet(f"font-size: 11px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
+        self.lbl_avail_details.setStyleSheet(f"background: transparent; border: none; font-size: 11px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
         card_layout.addWidget(self.lbl_avail_details)
 
         layout.addWidget(card)
 
         # Release Notes Browser
         lbl_notes_title = QLabel("What's New in this Release:")
-        lbl_notes_title.setStyleSheet("font-size: 12px; font-weight: 600;")
+        lbl_notes_title.setStyleSheet("background: transparent; border: none; font-size: 12px; font-weight: 600;")
         layout.addWidget(lbl_notes_title)
 
         self.browser_notes = QTextBrowser()
@@ -434,7 +452,7 @@ class UpdateDialog(QDialog):
         card_layout.setSpacing(10)
 
         self.lbl_dl_status = QLabel("Downloading update package...")
-        self.lbl_dl_status.setStyleSheet("font-size: 13px; font-weight: 600;")
+        self.lbl_dl_status.setStyleSheet("background: transparent; border: none; font-size: 13px; font-weight: 600;")
         self.lbl_dl_status.setAlignment(Qt.AlignCenter)
         card_layout.addWidget(self.lbl_dl_status)
 
@@ -445,7 +463,7 @@ class UpdateDialog(QDialog):
         card_layout.addWidget(self.prog_dl)
 
         self.lbl_dl_bytes = QLabel("Connecting...")
-        self.lbl_dl_bytes.setStyleSheet(f"font-size: 11px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
+        self.lbl_dl_bytes.setStyleSheet(f"background: transparent; border: none; font-size: 11px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
         self.lbl_dl_bytes.setAlignment(Qt.AlignCenter)
         card_layout.addWidget(self.lbl_dl_bytes)
 
@@ -469,12 +487,12 @@ class UpdateDialog(QDialog):
         card_layout.setSpacing(10)
 
         lbl_err_title = QLabel("Unable to Check for Updates")
-        lbl_err_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #EF4444;")
+        lbl_err_title.setStyleSheet("background: transparent; border: none; font-size: 14px; font-weight: 700; color: #EF4444;")
         card_layout.addWidget(lbl_err_title)
 
         self.lbl_err_msg = QLabel("Could not reach GitHub Releases server. Please verify your internet connection.")
         self.lbl_err_msg.setWordWrap(True)
-        self.lbl_err_msg.setStyleSheet(f"font-size: 12px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
+        self.lbl_err_msg.setStyleSheet(f"background: transparent; border: none; font-size: 12px; color: {'#94A3B8' if self.is_dark else '#64748B'};")
         card_layout.addWidget(self.lbl_err_msg)
         card_layout.addStretch()
 

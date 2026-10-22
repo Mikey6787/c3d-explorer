@@ -35,8 +35,12 @@ def build_theme_qss(
 QMainWindow, QDialog, QWidget {{
     background-color: {bg};
     color: {text};
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 13px;
+}}
+
+QLabel {{
+    background: transparent;
 }}
 
 /* Menu Bar */
