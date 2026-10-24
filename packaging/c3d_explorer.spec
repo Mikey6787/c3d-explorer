@@ -62,7 +62,7 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # Detect version from core/__init__.py
-version = '1.0.1'
+version = '1.0.2'
 try:
     with open(os.path.join(project_dir, 'core', '__init__.py'), 'r', encoding='utf-8') as f:
         for line in f:

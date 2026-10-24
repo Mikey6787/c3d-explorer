@@ -5,7 +5,7 @@ from core.c3d_reader import C3DReader
 from core.c3d_writer import C3DWriter
 from core.grw_calculator import compute_ground_reaction_wrenches
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 __all__ = [
     "__version__",
