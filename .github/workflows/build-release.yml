@@ -93,7 +93,7 @@ jobs:
             python_arch: arm64
             arch_name: Apple Silicon
             artifact_name: macos-dmg-applesilicon
-            dmg_filename: C3D_Explorer_Mac_AppleSilicon.dmg
+            dmg_filename: C3D_Explorer_Mac.dmg
           - arch: x86_64
             python_arch: x64
             arch_name: Intel
@@ -122,9 +122,6 @@ jobs:
       - name: Build macOS App & DMG Installer
         run: |
           arch -${{ matrix.arch }} bash packaging/build_mac.sh "dist_dmg/${{ matrix.dmg_filename }}"
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            cp "dist_dmg/${{ matrix.dmg_filename }}" dist_dmg/C3D_Explorer_Mac.dmg
-          fi
 
       - name: Verify Binary Architecture
         run: |
@@ -185,9 +182,8 @@ jobs:
           files: |
             release_assets/C3D_Explorer_Windows_Setup.exe
             release_assets/C3D_Explorer_Windows_Portable.zip
-            release_assets/C3D_Explorer_Mac_AppleSilicon.dmg
-            release_assets/C3D_Explorer_Mac_Intel.dmg
             release_assets/C3D_Explorer_Mac.dmg
+            release_assets/C3D_Explorer_Mac_Intel.dmg
           draft: false
           prerelease: false
           make_latest: true

@@ -629,17 +629,18 @@ class UpdateDialog(QDialog):
             arch = platform.machine().lower()
             is_intel = (arch in ("x86_64", "i386", "amd64"))
 
-            # 1. Primary priority: match architecture specific DMG
-            for a in assets:
-                name = a.get("name", "").lower()
-                if not name.endswith(".dmg"):
-                    continue
-                if is_intel and ("intel" in name or "x86_64" in name):
-                    return a
-                if not is_intel and ("applesilicon" in name or "arm64" in name or "silicon" in name):
-                    return a
+            if is_intel:
+                for a in assets:
+                    name = a.get("name", "").lower()
+                    if name.endswith(".dmg") and ("intel" in name or "x86_64" in name):
+                        return a
+            else:
+                for a in assets:
+                    name = a.get("name", "").lower()
+                    if name.endswith(".dmg") and "intel" not in name and "x86_64" not in name:
+                        return a
 
-            # 2. Secondary fallback: standard or universal DMG
+            # Fallback to any available .dmg
             for a in assets:
                 if a.get("name", "").lower().endswith(".dmg"):
                     return a

@@ -79,7 +79,7 @@ if [ -n "$1" ]; then
 elif [ "$ARCH" = "x86_64" ]; then
     OUTPUT_DMG="dist_dmg/C3D_Explorer_Mac_Intel.dmg"
 else
-    OUTPUT_DMG="dist_dmg/C3D_Explorer_Mac_AppleSilicon.dmg"
+    OUTPUT_DMG="dist_dmg/C3D_Explorer_Mac.dmg"
 fi
 mkdir -p "$(dirname "$OUTPUT_DMG")"
 rm -f "$OUTPUT_DMG"
