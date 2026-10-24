@@ -6,7 +6,7 @@ on:
       release_tag:
         description: 'Release tag to upload assets to (e.g. v1.0.1, or leave blank to build only)'
         required: false
-        default: 'v1.0.1'
+        default: 'v1.0.2'
   push:
     branches: [ main ]
     tags: [ 'v*' ]
@@ -80,11 +80,25 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # 2. MACOS BUILD JOB
+  # 2. MACOS BUILD JOBS (Apple Silicon & Intel)
   # ============================================================================
   build-macos:
-    name: Package macOS .app & DMG
-    runs-on: macos-latest
+    name: Package macOS (${{ matrix.arch_name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            arch: arm64
+            arch_name: Apple Silicon
+            artifact_name: macos-dmg-applesilicon
+            dmg_filename: C3D_Explorer_Mac_AppleSilicon.dmg
+          - os: macos-13
+            arch: x86_64
+            arch_name: Intel
+            artifact_name: macos-dmg-intel
+            dmg_filename: C3D_Explorer_Mac_Intel.dmg
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -103,13 +117,16 @@ jobs:
 
       - name: Build macOS App & DMG Installer
         run: |
-          bash packaging/build_mac.sh
+          bash packaging/build_mac.sh "dist_dmg/${{ matrix.dmg_filename }}"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            cp "dist_dmg/${{ matrix.dmg_filename }}" dist_dmg/C3D_Explorer_Mac.dmg
+          fi
 
       - name: Upload macOS DMG Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg
-          path: dist_dmg/C3D_Explorer_Mac.dmg
+          name: ${{ matrix.artifact_name }}
+          path: dist_dmg/*.dmg
           if-no-files-found: error
           retention-days: 7
 
@@ -160,6 +177,8 @@ jobs:
           files: |
             release_assets/C3D_Explorer_Windows_Setup.exe
             release_assets/C3D_Explorer_Windows_Portable.zip
+            release_assets/C3D_Explorer_Mac_AppleSilicon.dmg
+            release_assets/C3D_Explorer_Mac_Intel.dmg
             release_assets/C3D_Explorer_Mac.dmg
           draft: false
           prerelease: false

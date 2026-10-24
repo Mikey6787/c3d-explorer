@@ -71,10 +71,18 @@ ln -s /Applications "$DMG_STAGING/Applications"
 
 # 4. Create final compressed DMG
 mkdir -p dist_dmg
-OUTPUT_DMG="dist_dmg/C3D_Explorer_Mac.dmg"
+ARCH="$(uname -m)"
+if [ -n "$1" ]; then
+    OUTPUT_DMG="$1"
+elif [ "$ARCH" = "x86_64" ]; then
+    OUTPUT_DMG="dist_dmg/C3D_Explorer_Mac_Intel.dmg"
+else
+    OUTPUT_DMG="dist_dmg/C3D_Explorer_Mac_AppleSilicon.dmg"
+fi
+mkdir -p "$(dirname "$OUTPUT_DMG")"
 rm -f "$OUTPUT_DMG"
 
-echo "[4/4] Creating compressed DMG with hdiutil..."
+echo "[4/4] Creating compressed DMG with hdiutil for $ARCH ($OUTPUT_DMG)..."
 hdiutil create \
     -volname "C3D Explorer" \
     -srcfolder "$DMG_STAGING" \

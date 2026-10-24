@@ -295,11 +295,20 @@ class SidePanel(QWidget):
             box_layout.setSpacing(4)
 
             type_label = type_names.get(fp.type, f"Type {fp.type}")
-            specs = (
-                f"<b>Type:</b> {type_label} &nbsp;|&nbsp; "
-                f"<b>Size:</b> {fp.width:.0f} × {fp.length:.0f} mm<br>"
-                f"<b>Origin:</b> [{fp.origin[0]:.1f}, {fp.origin[1]:.1f}, {fp.origin[2]:.1f}] mm"
-            )
+            unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+            is_m = unit.lower() in ("m", "meter", "meters")
+            if is_m:
+                specs = (
+                    f"<b>Type:</b> {type_label} &nbsp;|&nbsp; "
+                    f"<b>Size:</b> {fp.width:.3f} × {fp.length:.3f} m<br>"
+                    f"<b>Origin:</b> [{fp.origin[0]:.3f}, {fp.origin[1]:.3f}, {fp.origin[2]:.3f}] m"
+                )
+            else:
+                specs = (
+                    f"<b>Type:</b> {type_label} &nbsp;|&nbsp; "
+                    f"<b>Size:</b> {fp.width:.0f} × {fp.length:.0f} mm<br>"
+                    f"<b>Origin:</b> [{fp.origin[0]:.1f}, {fp.origin[1]:.1f}, {fp.origin[2]:.1f}] mm"
+                )
             lbl_specs = QLabel(specs)
             lbl_specs.setStyleSheet(f"color: {specs_color}; font-size: 11px; margin-bottom: 4px;")
             box_layout.addWidget(lbl_specs)
@@ -377,13 +386,17 @@ class SidePanel(QWidget):
 
         # 3. Center of Pressure (COP) (Px, Py)
         if fp.cop is not None:
+            unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+            is_m = unit.lower() in ("m", "meter", "meters")
+            cop_u = "m" if is_m else "mm"
+            cop_dec = 3 if is_m else 1
             if analog_idx < len(fp.cop):
                 px = fp.cop[analog_idx, 0]
                 py = fp.cop[analog_idx, 1]
-                px_str = fmt_val(px, "mm", 1)
-                py_str = fmt_val(py, "mm", 1)
+                px_str = fmt_val(px, cop_u, cop_dec)
+                py_str = fmt_val(py, cop_u, cop_dec)
             else:
-                px_str = py_str = "--- mm"
+                px_str = py_str = f"--- {cop_u}"
 
             sections.append(f"""
               <div style="margin-top: 8px; padding-bottom: 2px; border-bottom: 1px solid {div_line}; color: {cop_color}; font-weight: bold; font-family: sans-serif; font-size: 10px; letter-spacing: 0.5px;">CENTER OF PRESSURE (COP)</div>

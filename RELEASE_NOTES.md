@@ -52,6 +52,8 @@
 
 | Platform | Package | SHA-256 / Verification |
 | :--- | :--- | :--- |
-| **Windows Installer** | `C3D_Explorer_Windows_Setup.exe` | Recommended for Windows 10/11 |
+| **Windows Installer** | `C3D_Explorer_Windows_Setup.exe` | Recommended for Windows 10/11 (64-bit Intel/AMD) |
 | **Windows Portable** | `C3D_Explorer_Windows_Portable.zip` | Standalone archive (no install required) |
-| **macOS** | `C3D_Explorer_Mac.dmg` | Drag-and-drop disk image for macOS |
+| **macOS (Apple Silicon)** | `C3D_Explorer_Mac_AppleSilicon.dmg` | Drag-and-drop disk image for Apple Silicon (M1/M2/M3/M4) |
+| **macOS (Intel)** | `C3D_Explorer_Mac_Intel.dmg` | Drag-and-drop disk image for Intel Macs (x86_64) |
+

@@ -624,7 +624,22 @@ class UpdateDialog(QDialog):
                     return a
 
         elif sys.platform == "darwin":
-            # Look for macOS .dmg
+            # Look for macOS .dmg matching current CPU architecture
+            import platform
+            arch = platform.machine().lower()
+            is_intel = (arch in ("x86_64", "i386", "amd64"))
+
+            # 1. Primary priority: match architecture specific DMG
+            for a in assets:
+                name = a.get("name", "").lower()
+                if not name.endswith(".dmg"):
+                    continue
+                if is_intel and ("intel" in name or "x86_64" in name):
+                    return a
+                if not is_intel and ("applesilicon" in name or "arm64" in name or "silicon" in name):
+                    return a
+
+            # 2. Secondary fallback: standard or universal DMG
             for a in assets:
                 if a.get("name", "").lower().endswith(".dmg"):
                     return a

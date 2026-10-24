@@ -573,8 +573,10 @@ class UniversalPlotter(QWidget):
 
                 # Center of Pressure (COP)
                 if fp.cop is not None:
+                    m_unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+                    cop_unit = "m" if m_unit.lower() in ("m", "meter", "meters") else "mm"
                     for cop_name, cop_idx in [("COP_x", 0), ("COP_y", 1), ("COP_z", 2)]:
-                        c_item = QTreeWidgetItem([f"FP{fp.id}_{cop_name} (mm)"])
+                        c_item = QTreeWidgetItem([f"FP{fp.id}_{cop_name} ({cop_unit})"])
                         c_item.setFlags(c_item.flags() | Qt.ItemIsUserCheckable)
                         c_item.setCheckState(0, Qt.Unchecked)
                         c_item.setData(0, Qt.UserRole, ("cop", fp.id - 1, cop_idx, cop_name))
@@ -862,11 +864,13 @@ class UniversalPlotter(QWidget):
         elif kind == "moment":
             unit = "N·mm"
         elif kind == "cop":
-            unit = "mm"
+            m_unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+            unit = "m" if m_unit.lower() in ("m", "meter", "meters") else "mm"
         elif kind == "analog":
             unit = self.trial.analog_units.get(role_data[1], "V") if self.trial and hasattr(self.trial, "analog_units") and self.trial.analog_units else "V"
         elif kind == "distance":
-            unit = "mm"
+            m_unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+            unit = "m" if m_unit.lower() in ("m", "meter", "meters") else "mm"
         elif kind == "angle":
             unit = "deg"
         elif kind == "custom":
@@ -1148,7 +1152,9 @@ class UniversalPlotter(QWidget):
             from gui.marker_tools_dialog import compute_distance_trajectory
             dist_data = compute_distance_trajectory(self.trial.markers[m1], self.trial.markers[m2])
 
-        label = f"Distance: {m1} ↔ {m2} (mm)"
+        m_unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+        dist_unit = "m" if m_unit.lower() in ("m", "meter", "meters") else "mm"
+        label = f"Distance: {m1} ↔ {m2} ({dist_unit})"
 
         # Check if Measurements category exists in tree
         meas_root = None

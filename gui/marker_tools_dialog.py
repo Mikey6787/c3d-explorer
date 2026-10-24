@@ -229,7 +229,10 @@ class MeasureDistanceDialog(QDialog):
         box_layout = QVBoxLayout(box)
         box_layout.setSpacing(6)
 
-        self.lbl_cur_dist = QLabel("Current Distance: --- mm")
+        unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+        is_m = unit.lower() in ("m", "meter", "meters")
+        u_str = "m" if is_m else (unit or "mm")
+        self.lbl_cur_dist = QLabel(f"Current Distance: --- {u_str}")
         self.lbl_cur_dist.setStyleSheet("font-size: 14px; font-weight: 700; color: #00ADB5;")
         box_layout.addWidget(self.lbl_cur_dist)
 
@@ -269,13 +272,20 @@ class MeasureDistanceDialog(QDialog):
             if np.isnan(d):
                 self.lbl_cur_dist.setText(f"Frame {frame_idx + 1} Distance: Missing / Untracked")
             else:
-                self.lbl_cur_dist.setText(f"Frame {frame_idx + 1} Distance: {d:.2f} mm")
+                unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+                is_m = unit.lower() in ("m", "meter", "meters")
+                u_str = "m" if is_m else (unit or "mm")
+                dec = 3 if is_m else 2
+                self.lbl_cur_dist.setText(f"Frame {frame_idx + 1} Distance: {d:.{dec}f} {u_str}")
 
     def _recompute(self):
         m1 = self.combo_m1.currentText()
         m2 = self.combo_m2.currentText()
         if not m1 or not m2 or m1 == m2:
-            self.lbl_cur_dist.setText("Current Distance: 0.00 mm")
+            unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+            is_m = unit.lower() in ("m", "meter", "meters")
+            u_str = "m" if is_m else (unit or "mm")
+            self.lbl_cur_dist.setText(f"Current Distance: 0.00 {u_str}")
             self.lbl_stats.setText("Please select two distinct markers.")
             return
 
@@ -306,8 +316,12 @@ class MeasureDistanceDialog(QDialog):
             min_d = float(np.min(valid))
             max_d = float(np.max(valid))
             std_d = float(np.std(valid))
+            unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+            is_m = unit.lower() in ("m", "meter", "meters")
+            u_str = "m" if is_m else (unit or "mm")
+            dec = 3 if is_m else 2
             self.lbl_stats.setText(
-                f"{prefix}Mean: {mean_d:.2f} ± {std_d:.2f} mm | Min: {min_d:.2f} mm | Max: {max_d:.2f} mm"
+                f"{prefix}Mean: {mean_d:.{dec}f} ± {std_d:.{dec}f} {u_str} | Min: {min_d:.{dec}f} {u_str} | Max: {max_d:.{dec}f} {u_str}"
             )
         else:
             self.lbl_stats.setText(f"{prefix}No valid tracking data in range.")

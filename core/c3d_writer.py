@@ -240,6 +240,11 @@ class C3DWriter:
             c['parameters']['POINT']['FRAMES']['value'] = [trim_frames]
             if 'LONG_FRAMES' in c['parameters']['POINT']:
                 c['parameters']['POINT']['LONG_FRAMES']['value'] = [float(trim_frames)]
+            if hasattr(trial, 'marker_units') and trial.marker_units:
+                if 'UNITS' not in c['parameters']['POINT']:
+                    c['parameters']['POINT']['UNITS'] = {'value': [trial.marker_units]}
+                else:
+                    c['parameters']['POINT']['UNITS']['value'] = [trial.marker_units]
 
         if 'PROCESSING' in c['parameters']:
             if 'Cropped Measurement Start Frame' in c['parameters']['PROCESSING']:

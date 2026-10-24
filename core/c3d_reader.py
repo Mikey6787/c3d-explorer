@@ -97,10 +97,12 @@ class C3DReader:
                 point_params = c['parameters']['POINT']
                 labels = point_params.get('LABELS', {}).get('value', [])
                 units_val = point_params.get('UNITS', {}).get('value', ['mm'])
-                if isinstance(units_val, (list, tuple)) and len(units_val) > 0:
-                    marker_units = str(units_val[0]).strip()
-                elif isinstance(units_val, str):
-                    marker_units = units_val.strip()
+                raw_u = units_val[0] if isinstance(units_val, (list, tuple)) and len(units_val) > 0 else units_val
+                if isinstance(raw_u, bytes):
+                    raw_u = raw_u.decode('utf-8', errors='ignore')
+                raw_u_str = str(raw_u).replace('\x00', '').strip()
+                if raw_u_str:
+                    marker_units = raw_u_str
 
                 for idx, lbl in enumerate(labels):
                     clean_name = str(lbl).strip()
@@ -111,6 +113,26 @@ class C3DReader:
                         )
         except Exception as e:
             print(f"Warning parsing markers with ezc3d: {e}")
+
+        # Auto-detect if coordinates are in meters despite UNITS parameter saying mm or missing
+        if marker_units.lower() in ("mm", "millimeter", "millimeters", ""):
+            max_coord = 0.0
+            found_any = False
+            for m_data in markers_dict.values():
+                if len(m_data) > 0:
+                    for f_idx in (0, len(m_data) // 2, len(m_data) - 1):
+                        pt = m_data[f_idx]
+                        if not (np.all(pt == 0) or np.any(np.isnan(pt))):
+                            found_any = True
+                            m = float(np.max(np.abs(pt)))
+                            if m > max_coord:
+                                max_coord = m
+                            if max_coord >= 25.0:
+                                break
+                    if max_coord >= 25.0:
+                        break
+            if found_any and 0.01 < max_coord < 25.0:
+                marker_units = "m"
 
         # Analogs
         analogs_dict: Dict[str, np.ndarray] = {}

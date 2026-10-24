@@ -234,6 +234,60 @@ class Viewer3D(QWidget):
 
         self._setup_ui()
 
+    @property
+    def unit_scale(self) -> float:
+        """
+        Scale multiplier relative to millimeters.
+        If marker coordinates are in meters, unit_scale is 0.001.
+        If marker coordinates are in centimeters, unit_scale is 0.01.
+        If marker coordinates are in millimeters, unit_scale is 1.0.
+        """
+        if not self.trial:
+            return 1.0
+        unit = (getattr(self.trial, "marker_units", "") or "").strip().lower()
+        if unit in ("m", "meter", "meters"):
+            return 0.001
+        elif unit in ("cm", "centimeter", "centimeters"):
+            return 0.01
+        elif unit in ("mm", "millimeter", "millimeters"):
+            if self._check_is_meter_coordinates():
+                return 0.001
+            return 1.0
+        else:
+            if self._check_is_meter_coordinates():
+                return 0.001
+            return 1.0
+
+    def _check_is_meter_coordinates(self) -> bool:
+        """Heuristic check: if non-zero marker coordinates never exceed 25.0, data is in meters."""
+        if not self.trial or not self.trial.markers:
+            return False
+        max_val = 0.0
+        found_any = False
+        for data in self.trial.markers.values():
+            if len(data) > 0:
+                indices = [0, len(data) // 2, len(data) - 1]
+                for idx in indices:
+                    pt = data[idx]
+                    if not (np.all(pt == 0) or np.any(np.isnan(pt))):
+                        found_any = True
+                        m = float(np.max(np.abs(pt)))
+                        if m > max_val:
+                            max_val = m
+                        if max_val >= 25.0:
+                            return False
+        return found_any and (0.01 < max_val < 25.0)
+
+    def _update_grid_geometry(self):
+        """Update ground grid dimensions and spacing for current unit scale."""
+        if not self.grid_item:
+            return
+        scale = self.unit_scale
+        grid_size = 10000.0 * scale
+        spacing = self.grid_spacing * scale
+        self.grid_item.setSize(grid_size, grid_size)
+        self.grid_item.setSpacing(spacing, spacing)
+
     def _setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -249,12 +303,11 @@ class Viewer3D(QWidget):
 
     def _init_scene(self):
         """Create ground grid, thick global coordinate triad, and marker cloud."""
-        # 1. Ground Grid (spacing 500mm, 10x10 meters, placed at low depth)
+        # 1. Ground Grid (placed at low depth)
         self.grid_item = gl.GLGridItem()
-        self.grid_item.setSize(10000, 10000)
-        self.grid_item.setSpacing(500, 500)
         self.grid_item.setColor((80, 90, 110, 80))
         self.grid_item.setDepthValue(-20)
+        self._update_grid_geometry()
         self.gl_view.addItem(self.grid_item)
 
         # 2. Prominent Global Lab Coordinate System (Thick lines, arrowheads, X/Y/Z labels)
@@ -337,9 +390,10 @@ class Viewer3D(QWidget):
             self.gl_view.removeItem(item)
         self.global_axis_items.clear()
 
-        axis_length = getattr(self, "axis_length", 320.0)
-        cone_len = max(25.0, axis_length * 0.14)
-        cone_radius = max(6.0, cone_len * 0.28)
+        scale = self.unit_scale
+        axis_length = getattr(self, "axis_length", 320.0) * scale
+        cone_len = max(25.0 * scale, axis_length * 0.14)
+        cone_radius = max(6.0 * scale, cone_len * 0.28)
         line_w = getattr(self, "axis_line_width", 2.0)
 
         c_x = (0.95, 0.22, 0.22, 1.0)  # Red
@@ -353,26 +407,27 @@ class Viewer3D(QWidget):
         u_z = self.transform_point(np.array([0, 0, 1], dtype=np.float32))
 
         # Shaft stops at the base of the cone so shaft does not overlap or swallow the cone!
-        ax_radius = max(2.5, line_w * 1.5)
+        ax_radius = max(2.5 * scale, line_w * 1.5 * scale)
         zero_pt = np.zeros(3, dtype=np.float32)
 
+        txt_offset = 18.0 * scale
         shaft_x = u_x * (axis_length - cone_len)
         tip_x = u_x * axis_length
         lx = make_cylinder_mesh(zero_pt, shaft_x, radius=ax_radius, color=c_x)
         cone_x = make_cone_mesh(tip_x, u_x, length=cone_len, radius=cone_radius, color=c_x)
-        txt_x = gl.GLTextItem(pos=u_x * (axis_length + 18), text="X", color=QColor(245, 55, 55, 255), font=font)
+        txt_x = gl.GLTextItem(pos=u_x * (axis_length + txt_offset), text="X", color=QColor(245, 55, 55, 255), font=font)
 
         shaft_y = u_y * (axis_length - cone_len)
         tip_y = u_y * axis_length
         ly = make_cylinder_mesh(zero_pt, shaft_y, radius=ax_radius, color=c_y)
         cone_y = make_cone_mesh(tip_y, u_y, length=cone_len, radius=cone_radius, color=c_y)
-        txt_y = gl.GLTextItem(pos=u_y * (axis_length + 18), text="Y", color=QColor(55, 220, 75, 255), font=font)
+        txt_y = gl.GLTextItem(pos=u_y * (axis_length + txt_offset), text="Y", color=QColor(55, 220, 75, 255), font=font)
 
         shaft_z = u_z * (axis_length - cone_len)
         tip_z = u_z * axis_length
         lz = make_cylinder_mesh(zero_pt, shaft_z, radius=ax_radius, color=c_z)
         cone_z = make_cone_mesh(tip_z, u_z, length=cone_len, radius=cone_radius, color=c_z)
-        txt_z = gl.GLTextItem(pos=u_z * (axis_length + 18), text="Z", color=QColor(65, 155, 250, 255), font=font)
+        txt_z = gl.GLTextItem(pos=u_z * (axis_length + txt_offset), text="Z", color=QColor(65, 155, 250, 255), font=font)
 
         items = [lx, cone_x, txt_x, ly, cone_y, txt_y, lz, cone_z, txt_z]
         for it in items:
@@ -403,15 +458,16 @@ class Viewer3D(QWidget):
 
     def fit_view_to_data(self):
         """Center and frame the camera around active markers and force plates."""
+        scale = self.unit_scale
         if not self.trial:
             self.gl_view.opts['center'] = QVector3D(0, 0, 0)
-            self.gl_view.opts['distance'] = 3200.0
+            self.gl_view.opts['distance'] = 3200.0 * scale
             self.gl_view.update()
             return
 
         all_points = []
         for name, data in self.trial.markers.items():
-            if len(data) > 0:
+            if len(data) > 0 and self.current_frame < len(data):
                 cur = data[self.current_frame]
                 if not (np.all(cur == 0) or np.any(np.isnan(cur))):
                     all_points.append(self.transform_point(cur))
@@ -422,7 +478,7 @@ class Viewer3D(QWidget):
 
         if not all_points:
             self.gl_view.opts['center'] = QVector3D(0, 0, 0)
-            self.gl_view.opts['distance'] = 3200.0
+            self.gl_view.opts['distance'] = 3200.0 * scale
             self.gl_view.update()
             return
 
@@ -434,7 +490,7 @@ class Viewer3D(QWidget):
 
         self.gl_view.opts['center'] = QVector3D(float(center[0]), float(center[1]), float(center[2]))
         # Provide a comfortable margin so global axes, subject, and plates are fully in view
-        self.gl_view.opts['distance'] = max(2600.0, float(span) * 2.2)
+        self.gl_view.opts['distance'] = max(2600.0 * scale, float(span) * 2.2)
         self.gl_view.update()
 
     def _get_effective_marker_size(self, base_size: Optional[float] = None) -> float:
@@ -445,17 +501,18 @@ class Viewer3D(QWidget):
         if base_size is None:
             base_size = self.marker_size
 
-        cur_dist = float(self.gl_view.opts.get('distance', 2500.0))
+        scale = self.unit_scale
+        cur_dist = float(self.gl_view.opts.get('distance', 2500.0 * scale))
         cur_fov = float(self.gl_view.opts.get('fov', 60.0))
 
         # Relative scaling factor from 2500 mm reference distance and 60° FOV
-        dist_factor = 2500.0 / max(350.0, cur_dist)
+        dist_factor = (2500.0 * scale) / max(350.0 * scale, cur_dist)
         fov_factor = 60.0 / max(10.0, cur_fov)
-        scale = dist_factor * fov_factor
+        eff_scale = dist_factor * fov_factor
 
         # Scale with sublinear exponent (0.80) so markers scale realistically
         # but remain comfortably bounded between 3.5px and 45px.
-        effective = base_size * (scale ** 0.80)
+        effective = base_size * (eff_scale ** 0.80)
         return float(np.clip(effective, 3.5, 45.0))
 
     def on_camera_zoomed(self):
@@ -476,6 +533,10 @@ class Viewer3D(QWidget):
         for item in self.selected_marker_labels.values():
             self.gl_view.removeItem(item)
         self.selected_marker_labels.clear()
+
+        # Update grid geometry & global axes to match current unit scale
+        self._update_grid_geometry()
+        self._build_global_axes()
 
         # Rebuild Force Plates
         self._rebuild_force_plates()
@@ -515,6 +576,7 @@ class Viewer3D(QWidget):
         if not self.trial:
             return
 
+        scale = self.unit_scale
         for fp in self.trial.force_platforms:
             c = fp.corners  # Shape (3, 4)
             p0 = self.transform_point(c[:, 0])
@@ -535,7 +597,7 @@ class Viewer3D(QWidget):
                 label_color = QColor(2, 132, 199, 255)
 
             verts = np.array([p0, p1, p2, p3], dtype=np.float32)
-            verts[:, 2] -= 2.0  # 2mm downward offset so markers resting on the surface are physically above
+            verts[:, 2] -= 2.0 * scale  # downward offset so markers resting on the surface are physically above
             faces = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int32)
             mesh = GLPlateMeshItem(
                 vertexes=verts,
@@ -552,7 +614,7 @@ class Viewer3D(QWidget):
 
             # Clean rectangular border perimeter (no internal diagonal split line)
             border_pts = np.array([p0, p1, p2, p3, p0], dtype=np.float32)
-            border_pts[:, 2] -= 1.8
+            border_pts[:, 2] -= 1.8 * scale
             border_line = gl.GLLinePlotItem(
                 pos=border_pts,
                 color=edge_color,
@@ -580,10 +642,10 @@ class Viewer3D(QWidget):
             uz_len = np.linalg.norm(uz)
             uz = uz / uz_len if uz_len > 1e-4 else np.array([0, 0, 1], dtype=np.float32)
 
-            axis_len = 130.0  # 130 mm sleek length
-            p_cone_len = 24.0
-            p_cone_rad = 7.5
-            p_radius = 2.5     # Solid, visible cylinder radius
+            axis_len = 130.0 * scale  # sleek length scaled to units
+            p_cone_len = 24.0 * scale
+            p_cone_rad = 7.5 * scale
+            p_radius = 2.5 * scale     # Solid, visible cylinder radius
 
             col_px = (0.95, 0.20, 0.20, 1.0)  # Red
             col_py = (0.15, 0.78, 0.25, 1.0)  # Green
@@ -650,13 +712,13 @@ class Viewer3D(QWidget):
             ty_norm = np.linalg.norm(ty)
             ty = ty / ty_norm if ty_norm > 1e-4 else np.array([0, 1, 0], dtype=np.float32)
 
-            # Physical size on plate: width 130mm, height 65mm
-            phys_w, phys_h = 130.0, 65.0
+            # Physical size on plate: width 130mm, height 65mm scaled to units
+            phys_w, phys_h = 130.0 * scale, 65.0 * scale
             sx = phys_w / w
             sy = phys_h / h
 
             target_pos = p0 + (c_center - p0) * 0.35
-            pos = target_pos - tx * (phys_w * 0.5) - ty * (phys_h * 0.5) + n_unit * 0.8
+            pos = target_pos - tx * (phys_w * 0.5) - ty * (phys_h * 0.5) + n_unit * (0.8 * scale)
 
             m = QMatrix4x4(
                 float(sx * tx[0]), float(sy * ty[0]), float(n_unit[0]), float(pos[0]),
@@ -800,7 +862,8 @@ class Viewer3D(QWidget):
 
                     f_vert = float(abs(f_vec[2]))
                     f_mag = float(np.linalg.norm(f_vec))
-                    max_dist = float(max(getattr(fp, "width", 600.0), getattr(fp, "length", 600.0)) * 1.5)
+                    scale = self.unit_scale
+                    max_dist = float(max(getattr(fp, "width", 600.0 * scale), getattr(fp, "length", 600.0 * scale)) * 1.5)
 
                     if (f_vert >= self.grf_threshold_n and f_mag > 1e-3 and
                         not np.any(np.isnan(cop_pt)) and
@@ -809,13 +872,13 @@ class Viewer3D(QWidget):
                         cop_v = self.transform_point(cop_pt)
                         f_vec_v = self.transform_point(f_vec)
                         f_dir = f_vec_v / f_mag
-                        scaled_len = f_mag * self.grf_vector_scale
+                        scaled_len = f_mag * (self.grf_vector_scale * scale)
                         end_pt = cop_v + f_dir * scaled_len
 
                         # Arrowhead sizing proportional to vector length
-                        cone_len = float(min(32.0, max(10.0, scaled_len * 0.22)))
+                        cone_len = float(min(32.0 * scale, max(10.0 * scale, scaled_len * 0.22)))
                         cone_rad = float(cone_len * 0.35)
-                        shaft_rad = float(max(2.8, min(7.0, cone_rad * 0.42)))
+                        shaft_rad = float(max(2.8 * scale, min(7.0 * scale, cone_rad * 0.42)))
 
                         # Shaft stops cleanly at base of cone so cone is never swallowed!
                         shaft_end = end_pt - f_dir * cone_len if scaled_len > cone_len else cop_v
@@ -874,8 +937,14 @@ class Viewer3D(QWidget):
                             self.meas_line1.setData(pos=np.array([p1_v, p2_v], dtype=np.float32))
                             self.meas_line1.setVisible(True)
                             self.meas_line2.setVisible(False)
-                            mid = (p1_v + p2_v) / 2.0 + np.array([0, 0, 15.0], dtype=np.float32)
-                            self.meas_label.setData(pos=mid, text=f"{dist:.1f} mm")
+                            scale = self.unit_scale
+                            mid = (p1_v + p2_v) / 2.0 + np.array([0, 0, 15.0 * scale], dtype=np.float32)
+                            unit_str = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+                            if scale == 0.001 and (not unit_str or unit_str.lower() in ("m", "meter", "meters")):
+                                text_dist = f"{dist:.3f} m"
+                            else:
+                                text_dist = f"{dist:.1f} {unit_str}"
+                            self.meas_label.setData(pos=mid, text=text_dist)
                             self.meas_label.setVisible(True)
                         else:
                             self.meas_line1.setVisible(False)
@@ -905,7 +974,8 @@ class Viewer3D(QWidget):
                             if n1 > 1e-4 and n2 > 1e-4:
                                 cos_val = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
                                 deg = np.degrees(np.arccos(cos_val))
-                                self.meas_label.setData(pos=pb_v + np.array([0, 0, 20.0], dtype=np.float32), text=f"{deg:.1f}°")
+                                scale = self.unit_scale
+                                self.meas_label.setData(pos=pb_v + np.array([0, 0, 20.0 * scale], dtype=np.float32), text=f"{deg:.1f}°")
                                 self.meas_label.setVisible(True)
                         else:
                             self.meas_line1.setVisible(False)
@@ -988,7 +1058,8 @@ class Viewer3D(QWidget):
                         self.selected_marker_labels[name].setVisible(False)
                     continue
                 pos_v = self.transform_point(pos)
-                offset = np.array([0.0, 0.0, 18.0], dtype=np.float32)
+                scale = self.unit_scale
+                offset = np.array([0.0, 0.0, 18.0 * scale], dtype=np.float32)
                 lbl_pos = pos_v + offset
                 if name not in self.selected_marker_labels:
                     txt_item = gl.GLTextItem(
@@ -1221,8 +1292,7 @@ class Viewer3D(QWidget):
     def set_grid_spacing(self, spacing: float):
         """Set ground grid cell spacing in mm."""
         self.grid_spacing = float(spacing)
-        if self.grid_item:
-            self.grid_item.setSpacing(self.grid_spacing, self.grid_spacing)
+        self._update_grid_geometry()
 
     def set_viewport_bg(self, color_str: str):
         """Set 3D viewport background color."""
