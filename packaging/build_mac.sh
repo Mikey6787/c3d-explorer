@@ -40,16 +40,18 @@ fi
 # 2. Build standalone .app with PyInstaller
 echo "[2/4] Running PyInstaller..."
 
-if command -v pyinstaller &> /dev/null; then
-    PYINSTALLER_BIN="pyinstaller"
+if python -m PyInstaller --version &> /dev/null; then
+    PYINSTALLER_BIN="python -m PyInstaller"
 elif python3 -m PyInstaller --version &> /dev/null; then
     PYINSTALLER_BIN="python3 -m PyInstaller"
+elif command -v pyinstaller &> /dev/null; then
+    PYINSTALLER_BIN="pyinstaller"
 elif [ -f "/opt/homebrew/bin/python3" ] && /opt/homebrew/bin/python3 -m PyInstaller --version &> /dev/null; then
     PYINSTALLER_BIN="/opt/homebrew/bin/python3 -m PyInstaller"
 else
     echo "Installing PyInstaller..."
     python3 -m pip install pyinstaller || pip install pyinstaller
-    PYINSTALLER_BIN="pyinstaller"
+    PYINSTALLER_BIN="python3 -m PyInstaller"
 fi
 
 $PYINSTALLER_BIN --clean --distpath dist --workpath build packaging/c3d_explorer.spec
