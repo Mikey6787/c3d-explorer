@@ -84,7 +84,7 @@ jobs:
   # ============================================================================
   build-macos:
     name: Package macOS (${{ matrix.arch_name }})
-    runs-on: macos-14
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
