@@ -22,6 +22,7 @@ from core.data_models import C3DTrial, C3DEvent
 from core.resource_utils import get_resource_path
 from core.c3d_reader import C3DReader
 from core.c3d_writer import C3DWriter
+from core.pipeline_manager import PipelineManager
 import pyqtgraph as pg
 from gui.viewer_3d import Viewer3D
 from gui.timeline_widget import TimelineWidget
@@ -29,19 +30,22 @@ from gui.playback_controller import PlaybackController
 from gui.side_panel import SidePanel
 from gui.settings_dialog import SettingsDialog
 from gui.marker_tools_dialog import (
-    CreateAverageMarkerDialog, MeasureDistanceDialog, MeasureAngleDialog, AddMarkerDialog,
+    CreateAverageMarkerDialog, CreateCentroidMarkerDialog, HipJointCenterDialog,
+    MeasureDistanceDialog, MeasureAngleDialog, AddMarkerDialog,
     FilterMarkersDialog, filter_marker_array
 )
 from gui.plotter_window import UniversalPlotter, UniversalPlotterWindow
 from gui.event_dialog import EventEditDialog, EventManagerDialog
 from gui.analog_dialog import AnalogToolsDialog
+from gui.force_plate_dialog import ForcePlateDialog
 from gui.about_dialog import AboutDialog
 from gui.update_dialog import UpdateDialog
+from gui.batch_processing_dialog import BatchProcessingDialog
 from gui.undo_commands import (
     AddEventCommand, DeleteEventCommand, DeleteEventsCommand, EditEventCommand,
     ClearEventsCommand, EventsBatchCommand, RenameMarkerCommand,
     AddMarkerCommand, DeleteMarkerCommand, DeleteMarkersCommand, ChangeMarkerColorCommand,
-    FilterMarkersCommand
+    FilterMarkersCommand, ConfigureForcePlateCommand
 )
 
 
@@ -62,13 +66,18 @@ class MainWindow(QMainWindow):
 
         self.trial: Optional[C3DTrial] = None
         self.current_file_path: Optional[str] = None
-        self.settings = QSettings("Biomech", "C3D explorer")
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            self.settings = QSettings("Biomech_Test", "C3D explorer_Test")
+        else:
+            self.settings = QSettings("Biomech", "C3D explorer")
         self.undo_stack = QUndoStack(self)
+        self.pipeline_manager = PipelineManager()
         self._is_undo_redo_running: bool = False
 
         self.dist_dialog: Optional[MeasureDistanceDialog] = None
         self.angle_dialog: Optional[MeasureAngleDialog] = None
         self.analog_dialog: Optional[AnalogToolsDialog] = None
+        self.force_plate_dialog: Optional[ForcePlateDialog] = None
         self.plotter_widget = UniversalPlotter(parent=self)
         self.plotter_window = self.plotter_widget  # Maintain reference for compatibility
         self.plot_panel = self.plotter_widget      # Alias for backwards compatibility
@@ -306,7 +315,20 @@ class MainWindow(QMainWindow):
         act_exp_csv_analogs.triggered.connect(self.export_analogs_csv_dialog)
         export_menu.addAction(act_exp_csv_analogs)
 
+        export_menu.addSeparator()
+
+        act_exp_pipeline = QAction("Export Pipeline (XML)...", self)
+        act_exp_pipeline.setStatusTip("Export all trial modifications, settings, and operations to an XML pipeline file")
+        act_exp_pipeline.triggered.connect(self.export_pipeline_dialog)
+        export_menu.addAction(act_exp_pipeline)
+
         file_menu.addSeparator()
+
+        act_batch_file = QAction("Batch &Processing...", self)
+        act_batch_file.setShortcut("Ctrl+Shift+B")
+        act_batch_file.setStatusTip("Execute an XML pipeline recipe or current trial operations across multiple C3D files in batch")
+        act_batch_file.triggered.connect(self.open_batch_processing_dialog)
+        file_menu.addAction(act_batch_file)
 
         file_menu.addSeparator()
 
@@ -450,9 +472,14 @@ class MainWindow(QMainWindow):
         tools_menu.addAction(act_plotter)
 
         act_analog = QAction("&Analog...", self)
-        act_analog.setStatusTip("Manage and filter analog channels (rename, delete, import, Butterworth/RMS filters)")
+        act_analog.setStatusTip("Manage, filter, and configure analog specifications (SCALE, OFFSET, GEN_SCALE, UNITS)")
         act_analog.triggered.connect(self.open_analog_tools_dialog)
         tools_menu.addAction(act_analog)
+
+        act_force_plate = QAction("&Force Plate...", self)
+        act_force_plate.setStatusTip("Configure force plates (automatic Shimba calculation or custom corners, center offset, and 6x6 calibration matrix)")
+        act_force_plate.triggered.connect(self.open_force_plate_dialog)
+        tools_menu.addAction(act_force_plate)
 
         # Events Submenu
         event_menu = tools_menu.addMenu("&Events")
@@ -488,6 +515,16 @@ class MainWindow(QMainWindow):
         act_avg_marker.triggered.connect(self.open_average_marker_dialog)
         marker_menu.addAction(act_avg_marker)
 
+        act_centroid_marker = QAction("Create &Centroid Marker...", self)
+        act_centroid_marker.setStatusTip("Create a virtual centroid marker as the geometric center of multiple markers")
+        act_centroid_marker.triggered.connect(self.open_centroid_marker_dialog)
+        marker_menu.addAction(act_centroid_marker)
+
+        act_hjc_marker = QAction("&Hip Joint Center (Harrington)...", self)
+        act_hjc_marker.setStatusTip("Calculate Left and Right Hip Joint Centers (LHJC, RHJC) using Harrington et al. (2006)")
+        act_hjc_marker.triggered.connect(self.open_hip_joint_center_dialog)
+        marker_menu.addAction(act_hjc_marker)
+
         act_meas_dist = QAction("Measure &Distance Between 2 Markers...", self)
         act_meas_dist.triggered.connect(self.open_measure_distance_dialog)
         marker_menu.addAction(act_meas_dist)
@@ -510,6 +547,14 @@ class MainWindow(QMainWindow):
         act_color_marker = QAction("Change Marker &Color...", self)
         act_color_marker.triggered.connect(self.side_panel._action_change_marker_color)
         marker_menu.addAction(act_color_marker)
+
+        tools_menu.addSeparator()
+
+        act_batch_tools = QAction("&Batch Processing...", self)
+        act_batch_tools.setShortcut("Ctrl+Shift+B")
+        act_batch_tools.setStatusTip("Execute an XML pipeline recipe or current trial operations across multiple C3D files in batch")
+        act_batch_tools.triggered.connect(self.open_batch_processing_dialog)
+        tools_menu.addAction(act_batch_tools)
 
         # ---------------- HELP MENU ----------------
         help_menu = menubar.addMenu("&Help")
@@ -585,6 +630,9 @@ class MainWindow(QMainWindow):
         self.side_panel.editEventRequested.connect(self.edit_event_dialog)
         self.side_panel.deleteEventRequested.connect(self.delete_event)
         self.side_panel.deleteEventsRequested.connect(self.delete_event)
+        self.side_panel.createAverageMarkerRequested.connect(self.open_average_marker_dialog)
+        self.side_panel.createCentroidMarkerRequested.connect(self.open_centroid_marker_dialog)
+        self.side_panel.calculateHJCRequested.connect(self.open_hip_joint_center_dialog)
 
         # Timeline Trim / Cut range synchronization
         self.timeline.trimRangeChanged.connect(self._on_trim_range_changed)
@@ -760,13 +808,40 @@ class MainWindow(QMainWindow):
             return
 
         dlg = AddMarkerDialog(self.trial, parent=self)
-        dlg.markerAdded.connect(self._on_marker_added)
+        dlg.markerAdded.connect(
+            lambda name, data, color: self._on_marker_added(
+                name, data, color,
+                source_type=getattr(dlg, 'source_type', 'manual'),
+                source_file=getattr(dlg, 'source_file', ''),
+                default_coords=getattr(dlg, 'default_coords', None)
+            )
+        )
         dlg.exec()
 
-    def _on_marker_added(self, name: str, data: np.ndarray, color: Optional[QColor]):
+    def _on_marker_added(
+        self,
+        name: str,
+        data: np.ndarray,
+        color: Optional[QColor],
+        source_type: str = "manual",
+        source_file: str = "",
+        default_coords: Optional[Tuple[float, float, float]] = None
+    ):
         rgba = (color.redF(), color.greenF(), color.blueF(), color.alphaF()) if color else None
-        cmd = AddMarkerCommand(self, self.trial, name, data, rgba)
+        cmd = AddMarkerCommand(
+            self, self.trial, name, data, rgba,
+            source_type=source_type, source_file=source_file, default_coords=default_coords
+        )
         self.undo_stack.push(cmd)
+        if hasattr(self, 'pipeline_manager') and self.pipeline_manager:
+            self.pipeline_manager.record_add_marker(
+                name=name,
+                source_type=source_type,
+                source_file=source_file,
+                default_coords=default_coords,
+                color_rgba=rgba,
+                frame_count=len(data) if data is not None else None
+            )
 
     def open_filter_markers_dialog(self):
         """Open dialog to configure Butterworth low-pass filter parameters for all markers."""
@@ -790,23 +865,122 @@ class MainWindow(QMainWindow):
         old_markers = {name: arr.copy() for name, arr in self.trial.markers.items()}
         new_markers = {name: filter_marker_array(arr, fs, order, cutoff) for name, arr in self.trial.markers.items()}
 
-        cmd = FilterMarkersCommand(self, self.trial, order, cutoff, old_markers, new_markers)
+        cmd = FilterMarkersCommand(self, self.trial, order, cutoff, old_markers, new_markers, fs=fs, zero_phase=True)
         self.undo_stack.push(cmd)
+        if hasattr(self, 'pipeline_manager') and self.pipeline_manager:
+            self.pipeline_manager.record_filter_markers(
+                order=order,
+                cutoff=cutoff,
+                sampling_rate=fs,
+                zero_phase=True,
+                markers_count=len(self.trial.markers)
+            )
 
-    def open_average_marker_dialog(self):
+    def open_average_marker_dialog(self, preselected: Optional[List[str]] = None):
         if not self.trial or not self.trial.markers:
             QMessageBox.information(self, "Marker Tool", "Please load a C3D trial first.")
             return
-        selected = self.side_panel.get_selected_markers()
-        if not selected and hasattr(self.viewer_3d, 'selected_markers'):
-            selected = list(self.viewer_3d.selected_markers)
+        if preselected and isinstance(preselected, (list, tuple)):
+            selected = list(preselected)
+        else:
+            selected = self.side_panel.get_selected_markers()
+            if not selected and hasattr(self.viewer_3d, 'selected_markers'):
+                selected = list(self.viewer_3d.selected_markers)
         dlg = CreateAverageMarkerDialog(self.trial, preselected=selected, parent=self)
-        dlg.markerCreated.connect(self._on_average_marker_created)
+        dlg.markerCreated.connect(
+            lambda name, data: self._on_average_marker_created(
+                name, data, getattr(dlg, 'parent_marker1', ''), getattr(dlg, 'parent_marker2', '')
+            )
+        )
         dlg.exec()
 
-    def _on_average_marker_created(self, name: str, data: np.ndarray):
-        cmd = AddMarkerCommand(self, self.trial, name, data)
+    def _on_average_marker_created(self, name: str, data: np.ndarray, parent1: str = "", parent2: str = ""):
+        parents = [parent1, parent2] if (parent1 and parent2) else None
+        cmd = AddMarkerCommand(self, self.trial, name, data, source_type="average", parent_markers=parents)
         self.undo_stack.push(cmd)
+        if hasattr(self, 'pipeline_manager') and self.pipeline_manager:
+            if parent1 and parent2:
+                self.pipeline_manager.record_create_average_marker(name, parent1, parent2)
+            else:
+                self.pipeline_manager.record_add_marker(name, source_type="average")
+
+    def open_centroid_marker_dialog(self, preselected: Optional[List[str]] = None):
+        if not self.trial or not self.trial.markers:
+            QMessageBox.information(self, "Marker Tool", "Please load a C3D trial first.")
+            return
+        if preselected and isinstance(preselected, (list, tuple)):
+            selected = list(preselected)
+        else:
+            selected = self.side_panel.get_selected_markers()
+            if not selected and hasattr(self.viewer_3d, 'selected_markers'):
+                selected = list(self.viewer_3d.selected_markers)
+        dlg = CreateCentroidMarkerDialog(self.trial, preselected=selected, parent=self)
+        dlg.markerCreated.connect(
+            lambda name, data: self._on_centroid_marker_created(
+                name, data, getattr(dlg, 'parent_markers', [])
+            )
+        )
+        dlg.exec()
+
+    def _on_centroid_marker_created(self, name: str, data: np.ndarray, parent_markers: Optional[List[str]] = None):
+        parents = parent_markers if parent_markers else None
+        cmd = AddMarkerCommand(self, self.trial, name, data, source_type="centroid", parent_markers=parents)
+        self.undo_stack.push(cmd)
+        if hasattr(self, 'pipeline_manager') and self.pipeline_manager:
+            if parents:
+                self.pipeline_manager.record_create_centroid_marker(name, parents)
+            else:
+                self.pipeline_manager.record_add_marker(name, source_type="centroid")
+
+    def open_hip_joint_center_dialog(self, preselected: Optional[List[str]] = None):
+        if not self.trial or not self.trial.markers:
+            QMessageBox.information(self, "Marker Tool", "Please load a C3D trial with markers first.")
+            return
+        if preselected and isinstance(preselected, (list, tuple)):
+            selected = list(preselected)
+        else:
+            selected = self.side_panel.get_selected_markers()
+            if not selected and hasattr(self.viewer_3d, 'selected_markers'):
+                selected = list(self.viewer_3d.selected_markers)
+        dlg = HipJointCenterDialog(self.trial, preselected=selected, parent=self)
+        dlg.markersCreated.connect(self._on_hjc_markers_created)
+        dlg.exec()
+
+    def _on_hjc_markers_created(
+        self,
+        rhjc_name: str,
+        rhjc_data: np.ndarray,
+        lhjc_name: str,
+        lhjc_data: np.ndarray,
+        lasi_marker: str = "",
+        rasi_marker: str = "",
+        lpsi_marker: str = "",
+        rpsi_marker: str = ""
+    ):
+        parents = [m for m in (lasi_marker, rasi_marker, lpsi_marker, rpsi_marker) if m]
+        self.undo_stack.beginMacro(f"Calculate Hip Joint Centers ({rhjc_name}, {lhjc_name})")
+        cmd_r = AddMarkerCommand(
+            self, self.trial, rhjc_name, rhjc_data,
+            color_rgba=(0.0, 0.85, 1.0, 1.0), source_type="hjc", parent_markers=parents
+        )
+        cmd_l = AddMarkerCommand(
+            self, self.trial, lhjc_name, lhjc_data,
+            color_rgba=(1.0, 0.45, 0.65, 1.0), source_type="hjc", parent_markers=parents
+        )
+        self.undo_stack.push(cmd_r)
+        self.undo_stack.push(cmd_l)
+        self.undo_stack.endMacro()
+
+        if hasattr(self, 'pipeline_manager') and self.pipeline_manager:
+            self.pipeline_manager.record_calculate_hjc(
+                rhjc_name=rhjc_name,
+                lhjc_name=lhjc_name,
+                lasi_marker=lasi_marker,
+                rasi_marker=rasi_marker,
+                lpsi_marker=lpsi_marker,
+                rpsi_marker=rpsi_marker
+            )
+        self.status.showMessage(f"Created Hip Joint Centers: '{rhjc_name}' and '{lhjc_name}'", 4000)
 
     def open_measure_distance_dialog(self):
         if not self.trial or not self.trial.markers:
@@ -868,7 +1042,7 @@ class MainWindow(QMainWindow):
         if self.trial:
             self.plotter_widget.update_frame(self.playback.current_frame)
 
-    def open_analog_tools_dialog(self):
+    def open_analog_tools_dialog(self, initial_tab: int = 0):
         """Open the Analog Channels Manager & Signal Processing dialog."""
         if not self.trial:
             QMessageBox.information(self, "Analog Tools", "Please load a C3D trial first.")
@@ -878,9 +1052,65 @@ class MainWindow(QMainWindow):
         self.analog_dialog.analogsChanged.connect(self._on_analogs_changed)
         self.analog_dialog.plotChannelRequested.connect(self._on_plot_analog_channel_requested)
         self.analog_dialog.plotChannelsRequested.connect(self._on_plot_analog_channels_requested)
+        if initial_tab != 0:
+            self.analog_dialog.set_active_tab(initial_tab)
         self.analog_dialog.show()
         self.analog_dialog.raise_()
         self.analog_dialog.activateWindow()
+
+    def open_analog_info_dialog(self):
+        """Open the Analog dialog directly on the Info / Specifications tab."""
+        self.open_analog_tools_dialog(initial_tab=2)
+
+    def open_force_plate_dialog(self):
+        """Open the Force Plate Configuration & Ground Reaction Force Calculation dialog."""
+        if not self.trial:
+            if os.environ.get("QT_QPA_PLATFORM") != "offscreen":
+                QMessageBox.information(self, "Force Plate Tools", "Please load a C3D trial first.")
+            return
+
+        self.force_plate_dialog = ForcePlateDialog(self.trial, parent=self)
+        self.force_plate_dialog.forcePlatesChanged.connect(self._on_force_plates_changed)
+        self.force_plate_dialog.show()
+        self.force_plate_dialog.raise_()
+        self.force_plate_dialog.activateWindow()
+
+    def _on_force_plates_changed(
+        self,
+        old_plates: list,
+        new_plates: list,
+        desc: str,
+        pipeline_params: dict
+    ):
+        """Handle Force Plate calculation/configuration changes with full undo/redo and pipeline logging."""
+        if not self.trial:
+            return
+        cmd = ConfigureForcePlateCommand(
+            self,
+            self.trial,
+            old_plates,
+            new_plates,
+            description=desc,
+            pipeline_params=pipeline_params
+        )
+        self.undo_stack.push(cmd)
+        if hasattr(self, "pipeline_manager") and self.pipeline_manager:
+            self.pipeline_manager.record_configure_force_plate(desc, pipeline_params)
+        self.set_modified(True)
+
+    def set_modified(self, modified: bool = True):
+        """Mark document as modified/dirty."""
+        self._is_modified = modified
+        title = self.windowTitle()
+        if "[*]" in title:
+            self.setWindowModified(modified)
+
+    def open_batch_processing_dialog(self):
+        """Open the Batch Processing dialog."""
+        if hasattr(self, 'pipeline_manager') and self.pipeline_manager and hasattr(self, 'undo_stack') and self.undo_stack:
+            self.pipeline_manager.sync_with_undo_stack(self.undo_stack)
+        dlg = BatchProcessingDialog(main_window=self, parent=self)
+        dlg.exec()
 
     def _on_plot_analog_channel_requested(self, ch_name: str):
         """Activate the analog channel under Analog Channels in Universal Plotter and plot it."""
@@ -1122,6 +1352,7 @@ class MainWindow(QMainWindow):
             self.trial = trial
             self.current_file_path = file_path
             self.undo_stack.clear()
+            self.pipeline_manager.set_trial(trial, file_path)
 
             # Configure Playback Controller
             self.playback.set_trial(trial.point_frame_count, trial.point_rate)
@@ -1292,6 +1523,54 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Export Complete", f"Analogs CSV exported successfully{trim_msg}:\n{path}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export CSV:\n{e}")
+
+    def export_pipeline_dialog(self):
+        """Export all settings, operations, and modifications to an XML pipeline file."""
+        if not self.trial:
+            QMessageBox.information(self, "Export Pipeline", "No trial loaded.")
+            return
+
+        default_dir = os.path.dirname(self.current_file_path) if self.current_file_path else ""
+        base = os.path.splitext(os.path.basename(self.current_file_path))[0] if self.current_file_path else "trial"
+        default_xml = os.path.join(default_dir, f"{base}_pipeline.xml") if default_dir else f"{base}_pipeline.xml"
+
+        path, _ = QFileDialog.getSaveFileName(self, "Export Pipeline to XML", default_xml, "XML Files (*.xml)")
+        if not path:
+            return
+
+        if not path.lower().endswith(".xml"):
+            path += ".xml"
+
+        try:
+            # Sync any operations currently in the undo stack
+            self.pipeline_manager.sync_with_undo_stack(self.undo_stack)
+
+            # Collect workstation settings
+            settings = self._collect_current_app_settings()
+
+            # Collect ROI / trim info
+            start_f = getattr(self.timeline, 'trim_start_frame', 0)
+            end_f = getattr(self.timeline, 'trim_end_frame', self.trial.point_frame_count - 1)
+            is_trimmed = (start_f > 0 or end_f < self.trial.point_frame_count - 1)
+            trim_info = {
+                "StartFrame": start_f,
+                "EndFrame": end_f,
+                "PointRate": self.trial.point_rate,
+                "IsTrimmed": is_trimmed,
+            }
+
+            self.pipeline_manager.export_xml(path, trial=self.trial, settings=settings, trim_info=trim_info)
+            self.status.showMessage(f"Pipeline exported successfully: {os.path.basename(path)}", 4000)
+            QMessageBox.information(
+                self,
+                "Export Complete",
+                f"Pipeline successfully exported to XML:\n{path}\n\n"
+                f"Operations recorded: {len(self.pipeline_manager.operations)}\n"
+                f"Markers in trial: {len(self.trial.markers)}\n"
+                f"Analog channels: {len(self.trial.analogs)}"
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", f"Failed to export pipeline to XML:\n{e}")
 
     def export_summary_report(self):
         """Export text summary report."""

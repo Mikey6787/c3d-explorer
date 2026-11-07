@@ -1,6 +1,7 @@
 """Marker analysis and measurement tools: Average Marker, Distance, and Angle."""
 
 import os
+import re
 import csv
 import numpy as np
 from typing import Optional, List, Dict, Tuple
@@ -10,11 +11,13 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QComboBox,
     QLineEdit, QPushButton, QLabel, QGroupBox, QCheckBox,
     QMessageBox, QColorDialog, QInputDialog, QFileDialog,
-    QRadioButton, QDoubleSpinBox, QSpinBox, QWidget
+    QRadioButton, QDoubleSpinBox, QSpinBox, QWidget,
+    QListWidget, QListWidgetItem
 )
 from gui.toggle_switch import ToggleSwitch
 
 from core.data_models import C3DTrial
+from core.pipeline_executor import compute_harrington_hjc
 
 
 
@@ -154,7 +157,394 @@ class CreateAverageMarkerDialog(QDialog):
         avg_data[m1_missing & ~m2_missing] = d2[m1_missing & ~m2_missing]
         avg_data[m2_missing & ~m1_missing] = d1[m2_missing & ~m1_missing]
 
+        self.parent_marker1 = m1
+        self.parent_marker2 = m2
         self.markerCreated.emit(name, avg_data)
+        self.accept()
+
+
+class CreateCentroidMarkerDialog(QDialog):
+    """Dialog to create a virtual centroid (geometric center) marker from multiple markers."""
+    markerCreated = Signal(str, np.ndarray)  # Emits (new_marker_name, trajectory_data)
+
+    def __init__(self, trial: C3DTrial, preselected: Optional[List[str]] = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create Centroid Marker")
+        self.resize(440, 500)
+        self.trial = trial
+        self.preselected = preselected or []
+        self.parent_markers: List[str] = []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # Header description
+        info_lbl = QLabel(
+            "Computes the geometric centroid (mean 3D coordinate) across all selected markers for every trial frame."
+        )
+        info_lbl.setWordWrap(True)
+        info_lbl.setStyleSheet("color: #8C96AB; font-size: 11px;")
+        layout.addWidget(info_lbl)
+
+        # Search filter
+        self.txt_search = QLineEdit()
+        self.txt_search.setPlaceholderText("Filter markers list...")
+        self.txt_search.textChanged.connect(self._filter_marker_items)
+        layout.addWidget(self.txt_search)
+
+        # Marker checklist
+        self.list_markers = QListWidget()
+        self.list_markers.setAlternatingRowColors(True)
+        self.list_markers.setStyleSheet("QListWidget::item { padding: 4px; }")
+
+        all_markers = sorted(list(self.trial.markers.keys()))
+        pre_set = set(self.preselected)
+
+        for m_name in all_markers:
+            item = QListWidgetItem(m_name, self.list_markers)
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            check_state = Qt.Checked if (m_name in pre_set) else Qt.Unchecked
+            item.setCheckState(check_state)
+            self.list_markers.addItem(item)
+
+        self.list_markers.itemChanged.connect(self._on_item_changed)
+        layout.addWidget(self.list_markers)
+
+        # Quick selection bar
+        btn_sel_box = QHBoxLayout()
+        btn_sel_box.setSpacing(6)
+        btn_sel_all = QPushButton("Select All")
+        btn_sel_all.clicked.connect(self._select_all_markers)
+        btn_sel_none = QPushButton("Clear")
+        btn_sel_none.clicked.connect(self._clear_selection)
+
+        self.lbl_count = QLabel("Selected: 0 markers")
+        self.lbl_count.setStyleSheet("font-weight: bold; color: #00ADB5;")
+
+        btn_sel_box.addWidget(btn_sel_all)
+        btn_sel_box.addWidget(btn_sel_none)
+        btn_sel_box.addStretch()
+        btn_sel_box.addWidget(self.lbl_count)
+        layout.addLayout(btn_sel_box)
+
+        # Form for output marker name
+        form = QFormLayout()
+        form.setSpacing(8)
+        self.txt_name = QLineEdit()
+        form.addRow("New Marker Name:", self.txt_name)
+        layout.addLayout(form)
+
+        layout.addSpacing(4)
+
+        # Buttons
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        self.btn_create = QPushButton("Create Centroid Marker")
+        self.btn_create.setObjectName("primaryBtn")
+        self.btn_create.clicked.connect(self._create_centroid)
+        btn_box.addWidget(self.btn_create)
+        layout.addLayout(btn_box)
+
+        self._update_name_and_count()
+
+    def _filter_marker_items(self, text: str):
+        query = text.strip().lower()
+        for i in range(self.list_markers.count()):
+            item = self.list_markers.item(i)
+            item.setHidden(query not in item.text().lower())
+
+    def _select_all_markers(self):
+        self.list_markers.blockSignals(True)
+        for i in range(self.list_markers.count()):
+            item = self.list_markers.item(i)
+            if not item.isHidden():
+                item.setCheckState(Qt.Checked)
+        self.list_markers.blockSignals(False)
+        self._update_name_and_count()
+
+    def _clear_selection(self):
+        self.list_markers.blockSignals(True)
+        for i in range(self.list_markers.count()):
+            self.list_markers.item(i).setCheckState(Qt.Unchecked)
+        self.list_markers.blockSignals(False)
+        self._update_name_and_count()
+
+    def _on_item_changed(self, item):
+        self._update_name_and_count()
+
+    def get_checked_markers(self) -> List[str]:
+        checked_set = set()
+        for i in range(self.list_markers.count()):
+            it = self.list_markers.item(i)
+            if it.checkState() == Qt.Checked:
+                checked_set.add(it.text())
+        ordered = [m for m in self.preselected if m in checked_set]
+        for i in range(self.list_markers.count()):
+            name = self.list_markers.item(i).text()
+            if name in checked_set and name not in ordered:
+                ordered.append(name)
+        return ordered
+
+    def _update_name_and_count(self):
+        checked = self.get_checked_markers()
+        count = len(checked)
+        self.lbl_count.setText(f"Selected: {count} marker{'s' if count != 1 else ''}")
+        if count >= 2:
+            self.lbl_count.setStyleSheet("font-weight: bold; color: #2EC4B6;")
+        else:
+            self.lbl_count.setStyleSheet("font-weight: bold; color: #FFB703;")
+
+        cur_name = self.txt_name.text().strip()
+        is_default = not cur_name or cur_name.startswith("Centroid_")
+        if is_default:
+            if 2 <= count <= 4:
+                suggested = "Centroid_" + "_".join(checked)
+            elif count > 4:
+                suggested = f"Centroid_{count}_markers"
+            else:
+                suggested = "Centroid_Marker"
+            self.txt_name.setText(suggested)
+
+    def _create_centroid(self):
+        checked = self.get_checked_markers()
+        if len(checked) < 2:
+            QMessageBox.warning(self, "Selection Required", "Please select at least 2 markers to compute a centroid.")
+            return
+
+        name = self.txt_name.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Invalid Name", "Please enter a valid marker name.")
+            return
+
+        if name in self.trial.markers:
+            res = QMessageBox.question(
+                self, "Overwrite Marker", f"Marker '{name}' already exists. Overwrite?"
+            )
+            if res != QMessageBox.Yes:
+                return
+
+        # Stack marker arrays: shape (K, N_frames, 3)
+        arrays = [self.trial.markers[m] for m in checked]
+        stacked = np.stack(arrays, axis=0)
+
+        # Missing marker condition: coordinates == (0,0,0) or NaN
+        is_missing = np.all(stacked == 0, axis=-1) | np.isnan(stacked).any(axis=-1)
+        masked = stacked.copy()
+        masked[is_missing] = np.nan
+
+        with np.errstate(invalid='ignore'):
+            centroid_data = np.nanmean(masked, axis=0)
+
+        all_missing = np.all(is_missing, axis=0)
+        centroid_data[all_missing] = 0.0
+
+        self.parent_markers = checked
+        self.markerCreated.emit(name, centroid_data.astype(np.float32))
+        self.accept()
+
+
+class HipJointCenterDialog(QDialog):
+    """
+    Dialog to compute Right and Left Hip Joint Centers (RHJC, LHJC)
+    according to Harrington et al. (J. Biomech 2006).
+    Requires 4 pelvis markers: LASIS, RASIS, LPSIS, RPSIS.
+    """
+    markersCreated = Signal(str, np.ndarray, str, np.ndarray, str, str, str, str)
+    # Emits (rhjc_name, rhjc_data, lhjc_name, lhjc_data, lasi_marker, rasi_marker, lpsi_marker, rpsi_marker)
+
+    def __init__(self, trial: C3DTrial, preselected: Optional[List[str]] = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Hip Joint Center (Harrington)")
+        self.resize(480, 520)
+        self.trial = trial
+        self.preselected = preselected or []
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+
+        info_lbl = QLabel(
+            "Computes Left & Right Hip Joint Centers (LHJC, RHJC) across all frames "
+            "using Harrington et al. (2006) regression equations based on 4 pelvic anatomical landmarks."
+        )
+        info_lbl.setWordWrap(True)
+        info_lbl.setStyleSheet("color: #8C96AB; font-size: 11px;")
+        layout.addWidget(info_lbl)
+
+        # Pelvis Markers Group
+        grp_landmarks = QGroupBox("Pelvis Anatomical Landmarks", self)
+        landmarks_layout = QFormLayout(grp_landmarks)
+        landmarks_layout.setSpacing(10)
+
+        marker_names = sorted(list(self.trial.markers.keys()))
+
+        self.combo_lasi = QComboBox(grp_landmarks)
+        self.combo_lasi.addItems(marker_names)
+        landmarks_layout.addRow("Left ASIS (LASIS):", self.combo_lasi)
+
+        self.combo_rasi = QComboBox(grp_landmarks)
+        self.combo_rasi.addItems(marker_names)
+        landmarks_layout.addRow("Right ASIS (RASIS):", self.combo_rasi)
+
+        self.combo_lpsi = QComboBox(grp_landmarks)
+        self.combo_lpsi.addItems(marker_names)
+        landmarks_layout.addRow("Left PSIS (LPSIS):", self.combo_lpsi)
+
+        self.combo_rpsi = QComboBox(grp_landmarks)
+        self.combo_rpsi.addItems(marker_names)
+        landmarks_layout.addRow("Right PSIS (RPSIS):", self.combo_rpsi)
+
+        layout.addWidget(grp_landmarks)
+
+        # Auto-match landmarks based on naming patterns and preselection
+        self._auto_detect_landmarks(marker_names)
+
+        # Output Marker Names Group
+        grp_names = QGroupBox("New Marker Names", self)
+        names_layout = QFormLayout(grp_names)
+        names_layout.setSpacing(10)
+
+        self.txt_rhjc = QLineEdit("RHJC", grp_names)
+        names_layout.addRow("Right HJC Marker Name:", self.txt_rhjc)
+
+        self.txt_lhjc = QLineEdit("LHJC", grp_names)
+        names_layout.addRow("Left HJC Marker Name:", self.txt_lhjc)
+
+        layout.addWidget(grp_names)
+
+        # Formula summary box
+        summary_lbl = QLabel(
+            "Harrington (2006) Formulae (mm, origin at ASIS midpoint OP):\n"
+            "• PW (Pelvis Width): distance between LASIS and RASIS\n"
+            "• PD (Pelvis Depth): distance between ASIS midpoint and PSIS midpoint\n"
+            "• Mediolateral offset: ±(0.33 · PW + 7.3) mm\n"
+            "• Anteroposterior offset: -(0.24 · PD + 9.9) mm\n"
+            "• Vertical offset: -(0.30 · PW + 10.9) mm"
+        )
+        summary_lbl.setStyleSheet("color: #718096; font-size: 10px; font-family: monospace;")
+        layout.addWidget(summary_lbl)
+
+        layout.addStretch()
+
+        # Dialog Buttons
+        btn_box = QHBoxLayout()
+        btn_box.addStretch()
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.clicked.connect(self.reject)
+        btn_box.addWidget(btn_cancel)
+
+        self.btn_calculate = QPushButton("Calculate & Add HJC Markers")
+        self.btn_calculate.setObjectName("primaryBtn")
+        self.btn_calculate.clicked.connect(self._calculate_and_create)
+        btn_box.addWidget(self.btn_calculate)
+
+        layout.addLayout(btn_box)
+
+    def _auto_detect_landmarks(self, marker_names: List[str]):
+        """Intelligently pre-populate the 4 landmark combo boxes."""
+        patterns = {
+            "lasi": ["LASIS", "LASI", "L_ASIS", "L_ASI", "LEFTASIS"],
+            "rasi": ["RASIS", "RASI", "R_ASIS", "R_ASI", "RIGHTASIS"],
+            "lpsi": ["LPSIS", "LPSI", "L_PSIS", "L_PSI", "LEFTPSIS"],
+            "rpsi": ["RPSIS", "RPSI", "R_PSIS", "R_PSI", "RIGHTPSIS"],
+        }
+
+        def match_one(pats, candidates):
+            for p in pats:
+                for c in candidates:
+                    clean = re.sub(r'[^a-zA-Z0-9]', '', c).upper()
+                    if clean == p.upper():
+                        return c
+            for p in pats:
+                for c in candidates:
+                    clean = re.sub(r'[^a-zA-Z0-9]', '', c).upper()
+                    if p.upper() in clean:
+                        return c
+            return None
+
+        # Try to match within preselected first
+        pre_lasi = match_one(patterns["lasi"], self.preselected)
+        pre_rasi = match_one(patterns["rasi"], self.preselected)
+        pre_lpsi = match_one(patterns["lpsi"], self.preselected)
+        pre_rpsi = match_one(patterns["rpsi"], self.preselected)
+
+        # Fallback to all markers
+        lasi = pre_lasi or match_one(patterns["lasi"], marker_names)
+        rasi = pre_rasi or match_one(patterns["rasi"], marker_names)
+        lpsi = pre_lpsi or match_one(patterns["lpsi"], marker_names)
+        rpsi = pre_rpsi or match_one(patterns["rpsi"], marker_names)
+
+        # If user preselected 4 markers and patterns didn't match, map in order
+        if len(self.preselected) >= 4:
+            if not lasi and self.preselected[0] in marker_names: lasi = self.preselected[0]
+            if not rasi and self.preselected[1] in marker_names: rasi = self.preselected[1]
+            if not lpsi and self.preselected[2] in marker_names: lpsi = self.preselected[2]
+            if not rpsi and self.preselected[3] in marker_names: rpsi = self.preselected[3]
+
+        if lasi: self.combo_lasi.setCurrentText(lasi)
+        if rasi: self.combo_rasi.setCurrentText(rasi)
+        if lpsi: self.combo_lpsi.setCurrentText(lpsi)
+        if rpsi: self.combo_rpsi.setCurrentText(rpsi)
+
+    def _calculate_and_create(self):
+        m_lasi = self.combo_lasi.currentText()
+        m_rasi = self.combo_rasi.currentText()
+        m_lpsi = self.combo_lpsi.currentText()
+        m_rpsi = self.combo_rpsi.currentText()
+
+        selected_landmarks = [m_lasi, m_rasi, m_lpsi, m_rpsi]
+        if len(set(selected_landmarks)) < 4:
+            QMessageBox.warning(
+                self, "Distinct Landmarks Required",
+                "Please select 4 distinct pelvis markers (LASIS, RASIS, LPSIS, RPSIS)."
+            )
+            return
+
+        rhjc_name = self.txt_rhjc.text().strip()
+        lhjc_name = self.txt_lhjc.text().strip()
+
+        if not rhjc_name or not lhjc_name:
+            QMessageBox.warning(self, "Invalid Names", "Please enter valid names for both RHJC and LHJC.")
+            return
+
+        if rhjc_name == lhjc_name:
+            QMessageBox.warning(self, "Duplicate Names", "Right and Left HJC marker names must be different.")
+            return
+
+        existing = []
+        if rhjc_name in self.trial.markers:
+            existing.append(rhjc_name)
+        if lhjc_name in self.trial.markers:
+            existing.append(lhjc_name)
+
+        if existing:
+            res = QMessageBox.question(
+                self, "Overwrite Marker(s)",
+                f"Marker(s) {', '.join(existing)} already exist. Overwrite?"
+            )
+            if res != QMessageBox.Yes:
+                return
+
+        d_lasi = self.trial.markers[m_lasi]
+        d_rasi = self.trial.markers[m_rasi]
+        d_lpsi = self.trial.markers[m_lpsi]
+        d_rpsi = self.trial.markers[m_rpsi]
+
+        rhjc_data, lhjc_data = compute_harrington_hjc(d_lasi, d_rasi, d_lpsi, d_rpsi)
+
+        self.markersCreated.emit(
+            rhjc_name, rhjc_data,
+            lhjc_name, lhjc_data,
+            m_lasi, m_rasi, m_lpsi, m_rpsi
+        )
         self.accept()
 
 
@@ -900,6 +1290,15 @@ class AddMarkerDialog(QDialog):
             y = self.spin_y.value()
             z = self.spin_z.value()
             data = np.tile([x, y, z], (self.expected_frames, 1)).astype(np.float32)
+
+        if self.radio_file.isChecked():
+            self.source_type = "file"
+            self.source_file = filepath
+            self.default_coords = None
+        else:
+            self.source_type = "manual"
+            self.source_file = ""
+            self.default_coords = (x, y, z)
 
         self.markerAdded.emit(name, data, self.selected_color)
         self.accept()

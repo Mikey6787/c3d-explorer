@@ -96,4 +96,36 @@ assert dlg.combo_m2.currentText() == "RASI", f"Expected RASI, got {dlg.combo_m2.
 assert dlg.txt_name.text() == "Avg_LASI_RASI", f"Expected Avg_LASI_RASI, got {dlg.txt_name.text()}"
 print("CreateAverageMarkerDialog auto-population with selected markers verified.")
 
+# 4. Test 2-marker context menu has "Create Average Marker"
+menu2, actions2 = side_panel.create_marker_context_menu(["LASI", "RASI"])
+assert "act_average" in actions2, "Expected act_average in 2-marker context menu"
+assert "Create Average Marker" in actions2["act_average"].text()
+assert "act_distance" in actions2
+assert "act_centroid" not in actions2
+print("2-marker context menu 'Create Average Marker' action verified.")
+
+# 5. Test 3-marker context menu has "Create Centroid Marker"
+menu3, actions3 = side_panel.create_marker_context_menu(["LASI", "RASI", "LPSI"])
+assert "act_centroid" in actions3, "Expected act_centroid in 3-marker context menu"
+assert "Create Centroid Marker" in actions3["act_centroid"].text()
+assert "act_average" not in actions3
+print("3-marker context menu 'Create Centroid Marker' action verified.")
+
+# 6. Test CreateCentroidMarkerDialog functionality
+from gui.marker_tools_dialog import CreateCentroidMarkerDialog
+centroid_dlg = CreateCentroidMarkerDialog(trial, preselected=["LASI", "RASI", "LPSI"])
+assert len(centroid_dlg.get_checked_markers()) == 3
+assert centroid_dlg.txt_name.text() == "Centroid_LASI_RASI_LPSI"
+
+# Verify calculation
+created_markers = []
+centroid_dlg.markerCreated.connect(lambda name, data: created_markers.append((name, data)))
+centroid_dlg._create_centroid()
+assert len(created_markers) == 1
+c_name, c_data = created_markers[0]
+assert c_name == "Centroid_LASI_RASI_LPSI"
+expected_c = (trial.markers["LASI"] + trial.markers["RASI"] + trial.markers["LPSI"]) / 3.0
+np.testing.assert_allclose(c_data, expected_c, rtol=1e-5)
+print("CreateCentroidMarkerDialog trajectory calculation verified.")
+
 print("ALL MULTI-SELECT & 3D PICKING TESTS PASSED PERFECTLY!", flush=True)

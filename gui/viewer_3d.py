@@ -651,22 +651,28 @@ class Viewer3D(QWidget):
             col_py = (0.15, 0.78, 0.25, 1.0)  # Green
             col_pz = (0.08, 0.52, 0.95, 1.0)  # Rich vibrant Blue
 
+            # Apply local X/Y coordinate system offset if configured on the force platform
+            axes_origin = c_center.copy()
+            c_off = getattr(fp, "coord_offset", None)
+            if c_off is not None and len(c_off) >= 2:
+                axes_origin = c_center + float(c_off[0]) * ux + float(c_off[1]) * uy
+
             # Local X Axis (solid cylinder and cone)
-            shaft_px = c_center + ux * (axis_len - p_cone_len)
-            tip_px = c_center + ux * axis_len
-            lx = make_cylinder_mesh(c_center, shaft_px, radius=p_radius, color=col_px)
+            shaft_px = axes_origin + ux * (axis_len - p_cone_len)
+            tip_px = axes_origin + ux * axis_len
+            lx = make_cylinder_mesh(axes_origin, shaft_px, radius=p_radius, color=col_px)
             cx = make_cone_mesh(tip_px, ux, length=p_cone_len, radius=p_cone_rad, color=col_px)
 
             # Local Y Axis (solid cylinder and cone)
-            shaft_py = c_center + uy * (axis_len - p_cone_len)
-            tip_py = c_center + uy * axis_len
-            ly = make_cylinder_mesh(c_center, shaft_py, radius=p_radius, color=col_py)
+            shaft_py = axes_origin + uy * (axis_len - p_cone_len)
+            tip_py = axes_origin + uy * axis_len
+            ly = make_cylinder_mesh(axes_origin, shaft_py, radius=p_radius, color=col_py)
             cy = make_cone_mesh(tip_py, uy, length=p_cone_len, radius=p_cone_rad, color=col_py)
 
             # Local Z Axis (solid cylinder and cone)
-            shaft_pz = c_center + uz * (axis_len - p_cone_len)
-            tip_pz = c_center + uz * axis_len
-            lz = make_cylinder_mesh(c_center, shaft_pz, radius=p_radius, color=col_pz)
+            shaft_pz = axes_origin + uz * (axis_len - p_cone_len)
+            tip_pz = axes_origin + uz * axis_len
+            lz = make_cylinder_mesh(axes_origin, shaft_pz, radius=p_radius, color=col_pz)
             cz = make_cone_mesh(tip_pz, uz, length=p_cone_len, radius=p_cone_rad, color=col_pz)
 
             # Plate Number / ID Annotation lying down flat on the force plate surface
@@ -678,7 +684,7 @@ class Viewer3D(QWidget):
             p.setRenderHint(QPainter.Antialiasing)
             p.setRenderHint(QPainter.TextAntialiasing)
             p.setPen(label_color)
-            p.setFont(QFont("Arial", 120, QFont.Bold))
+            p.setFont(QFont("Arial", 160, QFont.Bold))
             p.drawText(qimg.rect(), Qt.AlignCenter, label_text)
             p.end()
 
@@ -712,12 +718,12 @@ class Viewer3D(QWidget):
             ty_norm = np.linalg.norm(ty)
             ty = ty / ty_norm if ty_norm > 1e-4 else np.array([0, 1, 0], dtype=np.float32)
 
-            # Physical size on plate: width 130mm, height 65mm scaled to units
-            phys_w, phys_h = 130.0 * scale, 65.0 * scale
+            # Physical size on plate: width 240mm, height 120mm scaled to units
+            phys_w, phys_h = 240.0 * scale, 120.0 * scale
             sx = phys_w / w
             sy = phys_h / h
 
-            target_pos = p0 + (c_center - p0) * 0.35
+            target_pos = p0 + (c_center - p0) * 0.42
             pos = target_pos - tx * (phys_w * 0.5) - ty * (phys_h * 0.5) + n_unit * (0.8 * scale)
 
             m = QMatrix4x4(

@@ -252,19 +252,81 @@ class C3DWriter:
             if 'Cropped Measurement End Frame' in c['parameters']['PROCESSING']:
                 c['parameters']['PROCESSING']['Cropped Measurement End Frame']['value'] = [float(new_last_frame)]
 
-        # 4. Synchronize Force Platform parameters if created from scratch
-        if 'FORCE_PLATFORM' not in c['parameters'] and trial.force_platforms:
+        # 4. Synchronize Force Platform parameters
+        if trial.force_platforms:
             num_fp = len(trial.force_platforms)
-            c.add_parameter("FORCE_PLATFORM", "USED", [num_fp])
-            c.add_parameter("FORCE_PLATFORM", "TYPE", [fp.type for fp in trial.force_platforms])
-            c.add_parameter("FORCE_PLATFORM", "ZERO", [1, 0])
             corners_arr = np.zeros((3, 4, num_fp), dtype=np.float32)
             origins_arr = np.zeros((3, num_fp), dtype=np.float32)
             for i, fp in enumerate(trial.force_platforms):
                 corners_arr[:, :, i] = fp.corners
                 origins_arr[:, i] = fp.origin
-            c.add_parameter("FORCE_PLATFORM", "CORNERS", corners_arr)
-            c.add_parameter("FORCE_PLATFORM", "ORIGIN", origins_arr)
+
+            if 'FORCE_PLATFORM' not in c['parameters']:
+                c.add_parameter("FORCE_PLATFORM", "USED", [num_fp])
+                c.add_parameter("FORCE_PLATFORM", "TYPE", [fp.type for fp in trial.force_platforms])
+                c.add_parameter("FORCE_PLATFORM", "ZERO", [1, 0])
+                c.add_parameter("FORCE_PLATFORM", "CORNERS", corners_arr)
+                c.add_parameter("FORCE_PLATFORM", "ORIGIN", origins_arr)
+            else:
+                fp_grp = c['parameters']['FORCE_PLATFORM']
+                if 'USED' in fp_grp:
+                    fp_grp['USED']['value'] = [num_fp]
+                if 'TYPE' in fp_grp:
+                    fp_grp['TYPE']['value'] = [int(fp.type) for fp in trial.force_platforms]
+                if 'CORNERS' in fp_grp:
+                    fp_grp['CORNERS']['value'] = corners_arr
+                if 'ORIGIN' in fp_grp:
+                    fp_grp['ORIGIN']['value'] = origins_arr
+
+            # Synchronize CAL_MATRIX if any force plate has cal_matrix
+            if any(fp.cal_matrix is not None for fp in trial.force_platforms):
+                max_dim = max(
+                    (fp.cal_matrix.shape[0] for fp in trial.force_platforms if fp.cal_matrix is not None),
+                    default=6
+                )
+                cal_arr = np.zeros((max_dim, max_dim, num_fp), dtype=np.float32)
+                for i, fp in enumerate(trial.force_platforms):
+                    if fp.cal_matrix is not None:
+                        r = min(max_dim, fp.cal_matrix.shape[0])
+                        col = min(max_dim, fp.cal_matrix.shape[1])
+                        cal_arr[:r, :col, i] = fp.cal_matrix[:r, :col]
+                    else:
+                        np.fill_diagonal(cal_arr[:, :, i], 1.0)
+                if 'FORCE_PLATFORM' in c['parameters'] and 'CAL_MATRIX' in c['parameters']['FORCE_PLATFORM']:
+                    c['parameters']['FORCE_PLATFORM']['CAL_MATRIX']['value'] = cal_arr
+                else:
+                    try:
+                        c.add_parameter("FORCE_PLATFORM", "CAL_MATRIX", cal_arr)
+                    except Exception:
+                        pass
+
+            # Synchronize CHANNEL mapping if channel_names provided
+            if any(getattr(fp, 'channel_names', None) for fp in trial.force_platforms) and trial.analogs:
+                analog_keys = list(trial.analogs.keys())
+                max_ch = max((len(getattr(fp, 'channel_names', [])) or (8 if fp.type == 3 else 6)) for fp in trial.force_platforms)
+                ch_arr = np.zeros((max_ch, num_fp), dtype=np.int32)
+                existing_ch = c['parameters'].get('FORCE_PLATFORM', {}).get('CHANNEL', {}).get('value')
+                for i, fp in enumerate(trial.force_platforms):
+                    c_names = getattr(fp, 'channel_names', [])
+                    if c_names:
+                        for j, cname in enumerate(c_names[:max_ch]):
+                            if cname in analog_keys:
+                                ch_arr[j, i] = analog_keys.index(cname) + 1
+                    elif existing_ch is not None:
+                        if existing_ch.ndim == 2 and i < existing_ch.shape[1]:
+                            n_copy = min(max_ch, existing_ch.shape[0])
+                            ch_arr[:n_copy, i] = existing_ch[:n_copy, i]
+                        elif existing_ch.ndim == 1 and i == 0:
+                            n_copy = min(max_ch, len(existing_ch))
+                            ch_arr[:n_copy, 0] = existing_ch[:n_copy]
+                if np.any(ch_arr > 0):
+                    if 'FORCE_PLATFORM' in c['parameters'] and 'CHANNEL' in c['parameters']['FORCE_PLATFORM']:
+                        c['parameters']['FORCE_PLATFORM']['CHANNEL']['value'] = ch_arr
+                    else:
+                        try:
+                            c.add_parameter("FORCE_PLATFORM", "CHANNEL", ch_arr)
+                        except Exception:
+                            pass
 
         # 5. Synchronize Events
         if 'EVENT' in c['parameters']:

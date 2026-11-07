@@ -51,6 +51,9 @@ class SidePanel(QWidget):
     plotMarkerRequested = Signal(str)             # Emits marker name to plot (X, Y, Z)
     plotMarkersRequested = Signal(list)           # Emits List[str] of marker names to plot
     plotDistanceRequested = Signal(str, str)      # Emits (m1, m2) to plot Euclidean distance
+    createAverageMarkerRequested = Signal(list)   # Emits List[str] of 2 marker names
+    createCentroidMarkerRequested = Signal(list)  # Emits List[str] of 3+ marker names
+    calculateHJCRequested = Signal(list)          # Emits List[str] of 4 marker names
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -459,6 +462,10 @@ class SidePanel(QWidget):
             for fp, lbl_specs, lbl_data in self.fp_widgets:
                 lbl_data.setText(self._render_force_plate_html(fp, analog_idx))
 
+    def update_frame(self, frame_idx: int):
+        """Update live values for the given frame (alias for update_live_values)."""
+        self.update_live_values(frame_idx)
+
     # ---------------------------------------------------------
     # Marker Management (Rename, Color, Add)
     # ---------------------------------------------------------
@@ -632,7 +639,12 @@ class SidePanel(QWidget):
             actions["act_plot"] = menu.addAction(f"Plot Selected Markers ({count}) (X, Y, Z)")
             if count == 2:
                 m1, m2 = selected_names[0], selected_names[1]
+                actions["act_average"] = menu.addAction(f"Create Average Marker ({m1} + {m2}) / 2...")
                 actions["act_distance"] = menu.addAction(f"Distance ({m1} ↔ {m2})")
+            elif count > 2:
+                actions["act_centroid"] = menu.addAction(f"Create Centroid Marker ({count} markers)...")
+                if count == 4:
+                    actions["act_hjc"] = menu.addAction("Hip Joint Center (Harrington)...")
             menu.addSeparator()
             actions["act_color"] = menu.addAction(f"Change Color for {count} Selected Markers...")
             actions["act_reset"] = menu.addAction(f"Reset Color for {count} Selected Markers")
@@ -659,6 +671,15 @@ class SidePanel(QWidget):
                 self.plotMarkerRequested.emit(clicked_name)
             else:
                 self.plotMarkersRequested.emit(selected_names)
+        elif chosen == actions.get("act_average"):
+            if count == 2:
+                self.createAverageMarkerRequested.emit(selected_names)
+        elif chosen == actions.get("act_centroid"):
+            if count > 2:
+                self.createCentroidMarkerRequested.emit(selected_names)
+        elif chosen == actions.get("act_hjc"):
+            if count == 4:
+                self.calculateHJCRequested.emit(selected_names)
         elif chosen == actions.get("act_distance"):
             if count == 2:
                 self.plotDistanceRequested.emit(selected_names[0], selected_names[1])

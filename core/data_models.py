@@ -166,6 +166,24 @@ class ForcePlatformData:
     moments: Optional[np.ndarray] = None    # Shape (N, 3) - Mx, My, Mz (N.mm or N.m)
     cop: Optional[np.ndarray] = None        # Shape (N, 3) - Center of Pressure (mm)
     cal_matrix: Optional[np.ndarray] = None # Shape (6, 6) or (8, 8) calibration matrix
+    channel_names: List[str] = field(default_factory=list)  # Ordered analog channel names mapped to plate
+    coord_offset: Optional[np.ndarray] = None  # Optional (3,) local coordinate system offset [ox, oy, oz]
+
+    def clone(self) -> "ForcePlatformData":
+        """Return a deep copy of this ForcePlatformData instance."""
+        return ForcePlatformData(
+            id=self.id,
+            type=self.type,
+            corners=self.corners.copy() if self.corners is not None else np.zeros((3, 4), dtype=np.float32),
+            origin=self.origin.copy() if self.origin is not None else np.zeros(3, dtype=np.float32),
+            channels={k: v.copy() for k, v in self.channels.items()},
+            forces=self.forces.copy() if self.forces is not None else None,
+            moments=self.moments.copy() if self.moments is not None else None,
+            cop=self.cop.copy() if self.cop is not None else None,
+            cal_matrix=self.cal_matrix.copy() if self.cal_matrix is not None else None,
+            channel_names=list(self.channel_names),
+            coord_offset=self.coord_offset.copy() if self.coord_offset is not None else None,
+        )
 
     @property
     def center(self) -> np.ndarray:

@@ -96,7 +96,26 @@ print("SidePanel events table populated correctly!", flush=True)
 # 5. Test EventManagerDialog
 mgr_dlg = EventManagerDialog(trial=trial, current_frame=20)
 assert mgr_dlg.table.rowCount() == len(trial.events)
-print("EventManagerDialog loaded successfully!", flush=True)
+header_labels = [mgr_dlg.table.horizontalHeaderItem(c).text() for c in range(mgr_dlg.table.columnCount())]
+assert "Context" in header_labels, f"Expected 'Context' in headers, got: {header_labels}"
+assert "Subject" not in header_labels, f"'Subject' should be replaced by 'Context', got: {header_labels}"
+assert header_labels[3] == "Context"
+
+# Verify Context dropdown widget
+combo_w = mgr_dlg.table.cellWidget(0, 3)
+assert combo_w is not None, "Context column should have cell widget"
+combo_items = [combo_w.itemText(i) for i in range(combo_w.count())]
+assert combo_items == ["Left", "Right", "General"], f"Expected ['Left', 'Right', 'General'], got: {combo_items}"
+
+# Verify changing context via table dropdown updates event
+combo_w.setCurrentText("Right")
+assert trial.events[0].context == "Right"
+assert mgr_dlg.table.item(0, 3).text() == "Right"
+combo_w.setCurrentText("Left")
+assert trial.events[0].context == "Left"
+assert mgr_dlg.table.item(0, 3).text() == "Left"
+
+print("EventManagerDialog loaded successfully with Context column!", flush=True)
 
 # 6. Test EventManagerDialog Add and Close workflow with Undo/Redo
 from gui.main_window import MainWindow

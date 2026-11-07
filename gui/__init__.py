@@ -5,7 +5,8 @@ from gui.viewer_3d import Viewer3D
 from gui.timeline_widget import TimelineWidget
 from gui.playback_controller import PlaybackController
 from gui.marker_tools_dialog import (
-    CreateAverageMarkerDialog, MeasureDistanceDialog, MeasureAngleDialog,
+    CreateAverageMarkerDialog, CreateCentroidMarkerDialog, HipJointCenterDialog,
+    MeasureDistanceDialog, MeasureAngleDialog,
     FilterMarkersDialog, filter_marker_array
 )
 from gui.plotter_window import UniversalPlotter, UniversalPlotterWindow
@@ -21,6 +22,8 @@ __all__ = [
     "SidePanel",
     "PlaybackController",
     "CreateAverageMarkerDialog",
+    "CreateCentroidMarkerDialog",
+    "HipJointCenterDialog",
     "MeasureDistanceDialog",
     "MeasureAngleDialog",
     "FilterMarkersDialog",

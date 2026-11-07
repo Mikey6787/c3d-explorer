@@ -82,7 +82,7 @@ Under **`Tools -> Events`** (or timeline right-click):
   - **Description**: Detailed note or event annotation.
   - **Event ID**: Numeric index.
   - **Badge Color**: Auto-assigned or custom color picker.
-- **Manage Events Dialog**: Full tabular event manager to review, edit, delete, or clear all events.
+- **Manage Events Dialog**: Full tabular event manager (`Events -> Manage Events...`) with Event, Time (s), Frame, Context (Left, Right, or General with quick dropdown selection), and Description columns to review, edit, delete, or clear all events.
 - **Export & Persistence**: All created, modified, or deleted events are automatically synchronized into the C3D acquisition structure and saved when exporting/saving C3D files.
 
 ### 8. Interactive 3D Marker Picking & Analysis Tools
@@ -93,7 +93,9 @@ Under **`Tools -> Events`** (or timeline right-click):
   - Clicking empty 3D space deselects all markers.
 - **Bi-Directional Synchronization**: Selecting markers in the 3D viewport immediately highlights them in the Data Explorer panel table, and selecting markers in the table immediately highlights them in the 3D viewport.
 - **Tools with Auto-Populated Preselection**:
-  - **Create Average Marker (`Tools -> Marker -> Create Average Marker...`)**: Automatically pre-populates Marker 1 and Marker 2 with the selected markers and suggests a default name `Avg_M1_M2`. Computes midpoint trajectory across all frames.
+  - **Create Average Marker (`Tools -> Marker -> Create Average Marker...` or Right-Click 2 Selected Markers)**: Automatically pre-populates Marker 1 and Marker 2 with the selected markers and suggests a default name `Avg_M1_M2`. Computes midpoint trajectory across all trial frames.
+  - **Create Centroid Marker (`Tools -> Marker -> Create Centroid Marker...` or Right-Click 3+ Selected Markers)**: Interactive multi-marker checklist dialog to compute the geometric centroid (mean 3D coordinate) across 3 or more markers across all trial frames with smart NaN/missing value handling and automated naming (`Centroid_M1_M2_M3`).
+  - **Hip Joint Center (Harrington) (`Tools -> Marker -> Hip Joint Center (Harrington)...` or Right-Click 4 Selected Markers)**: Computes 3D Right and Left Hip Joint Centers (`RHJC`, `LHJC`) across all trial frames using Harrington et al. (2006) regression equations based on 4 pelvis anatomical landmarks (`LASIS`, `RASIS`, `LPSIS`, `RPSIS`) with automatic landmark matching and custom marker naming.
   - **Measure Distance between 2 Markers**: Automatically pre-populates Marker 1 and Marker 2 with selected markers, calculates Euclidean distance in real-time, displays live distance and statistics (Mean, SD, Min, Max) calculated strictly within the trimmed Region of Interest (ROI), interactive 3D line overlay, and 2D trajectory plotting with ROI curve highlighting, interactive ROI drag handles, and one-click "Fit ROI" / "Crop to ROI" options.
   - **Measure Angle between 3 Markers**: Pre-populates selected markers as A, B, and C, calculates 3D segment angle $\angle ABC$, with live angles, trial ROI statistics (Mean, SD, Min, Max computed between the trimmed positions), 3D angle ray overlays, and time-series plotting with ROI section highlighting.
 - **Rename & Custom Colors**:
@@ -124,13 +126,22 @@ Under **`Settings -> Visual Configurations...`**:
 - **3D Visuals Tab**: Marker radius, default marker color, selection highlight color, GRF vector scale, and minimum vertical force threshold.
 - **Playback Tab**: Default playback FPS and loop mode.
 
-### 10. Menus & File I/O
-- **File**: Open C3D (`Ctrl+O` / `Cmd+O`), Open Recent files list, Open File Location (Finder/Explorer), Save (`Ctrl+S`), Save As, Export C3D, Export as STL, Export CSV (Markers / Analogs), Exit.
+### 10. Pipeline Recipe Export & Batch Automation
+Under **`Tools -> Batch Processing...`** or **`File -> Batch Processing...`** (`Ctrl+Shift+B` / `Cmd+Shift+B`):
+- **Export Pipeline (XML)**: Under `File -> Export -> Export Pipeline (XML)...`, export all modifications, average markers, trajectory filtering, analog/EMG signal processing, and workstation settings as an executable XML recipe.
+- **Batch Processing Engine**:
+  - **Batch Queue**: Drag and drop 50, 100, or more C3D files, or add entire folders at once.
+  - **Intrinsic Processing**: Automatically computes virtual/average markers, zero-phase Butterworth filters, and signal processing dynamically for each file's data.
+  - **Per-Trial External Data Matching**: Automatically pairs each trial with its corresponding external CSV, Excel (`.xlsx`), or TXT file (e.g., `Trial name_Marker name.xlsx/txt or csv`) with fallback options and real-time pairing status.
+  - **Asynchronous Execution**: Background worker thread keeps the UI smooth with a live progress bar, file-by-file log, status badges (✓ Done, ⚠ Warning, ✕ Failed), and instant "Open Output Folder" upon completion.
+
+### 11. Menus & File I/O
+- **File**: Open C3D (`Ctrl+O` / `Cmd+O`), Open Recent files list, Save (`Ctrl+S`), Save As, Export C3D, Export as STL, Export CSV (Markers / Analogs), Export Pipeline (XML), Batch Processing (`Ctrl+Shift+B`), Exit.
 - **Edit**: Undo (`Ctrl+Z`), Redo (`Ctrl+Y` / `Cmd+Shift+Z`), Export Summary Report.
 - **View**: Reset View, Top, Front, Side, Iso views, Theme selection (`View -> Theme`), show/hide markers, plates, axes, grid, GRF vectors, and Panels submenu (`Data Explorer`, `Plotter`).
 - **Settings**: Direct dialog for visual configurations (Display, Coordinate System, 3D Visuals, Playback).
-- **Tools**: Plotter (`Ctrl+P`), Analog Channels & Signal Processing, Events (`Ctrl+E`), Marker submenu (Average, Distance, Angle, Rename, Color).
-- **Drag & Drop**: Drag any `.c3d` file directly into the window.
+- **Tools**: Plotter (`Ctrl+P`), Analog Channels & Signal Processing, Events (`Ctrl+E`), Marker submenu (Average, Distance, Angle, Rename, Color), Batch Processing (`Ctrl+Shift+B`).
+- **Drag & Drop**: Drag any `.c3d` file directly into the window or batch processing queue.
 
 ---
 
@@ -192,6 +203,7 @@ This generates the standalone binary in `dist\C3DExplorer\C3DExplorer.exe` and t
 | `Ctrl+S` / `Cmd+S` | Save C3D File |
 | `Ctrl+P` / `Cmd+P` | Open Universal Signal & Marker Plotter |
 | `Ctrl+E` / `Cmd+E` | Add C3D Event at Current Frame |
+| `Ctrl+Shift+B` / `Cmd+Shift+B` | Open Batch Processing |
 | `Ctrl+Q` / `Cmd+Q` | Quit Application |
 
 ---

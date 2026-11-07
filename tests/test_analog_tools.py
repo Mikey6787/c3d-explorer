@@ -19,7 +19,7 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import numpy as np
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QAbstractSpinBox
 from PySide6.QtCore import Qt
 
 from app import MainWindow
@@ -428,4 +428,63 @@ finally:
     if os.path.exists(tmp_c3d_path):
         os.remove(tmp_c3d_path)
 
+# -------------------------------------------------------------
+# 8. Test Tab 2 Name 'Filter', Multi-Channel Selection & EMG Custom
+# -------------------------------------------------------------
+from gui.analog_dialog import EMGCustomFilterDialog
+from core.pipeline_executor import apply_emg_custom_filter
+
+test_dlg = AnalogToolsDialog(trial)
+assert test_dlg.tabs.tabText(1) == "Filter", f"Expected tab name 'Filter', got '{test_dlg.tabs.tabText(1)}'"
+print("Tab 2 title is 'Filter' verified!")
+
+# Verify multi-channel checklist exists
+assert hasattr(test_dlg, "list_filter_channels")
+assert hasattr(test_dlg, "btn_filt_all_emg")
+assert hasattr(test_dlg, "btn_filt_all")
+assert hasattr(test_dlg, "btn_filt_clear")
+
+test_dlg._select_all_emg_filter()
+sel_emg = test_dlg.get_selected_filter_channels()
+assert "EMG2" in sel_emg and "EMG_Filtered_25Hz" in sel_emg and "FP_Fz" not in sel_emg
+print("Filter tab multi-channel selection & 'All EMG' filter verified!")
+
+test_dlg._clear_selection_filter()
+assert len(test_dlg.get_selected_filter_channels()) == 0
+test_dlg._select_all_filter()
+assert len(test_dlg.get_selected_filter_channels()) == test_dlg.list_filter_channels.count()
+print("Filter tab Select All and Clear verified!")
+
+# Verify EMG custom processing function (20-400 Hz BP + rectification + 20 Hz LP)
+test_sig = np.sin(2 * np.pi * 5 * t) + np.sin(2 * np.pi * 100 * t) + np.random.normal(0, 0.1, 1000)
+emg_res = apply_emg_custom_filter(test_sig, fs, bp_low=20.0, bp_high=400.0, lp_cutoff=20.0, bp_order=4, lp_order=4)
+assert len(emg_res) == len(test_sig)
+assert np.all(emg_res >= 0)
+print("apply_emg_custom_filter mathematical output verified!")
+
+# Verify EMGCustomFilterDialog UI and defaults
+emg_dlg = EMGCustomFilterDialog(trial)
+assert emg_dlg.spin_bp_low.value() == 20.0
+assert emg_dlg.spin_bp_high.value() == 400.0
+assert emg_dlg.spin_lp_cutoff.value() == 20.0
+assert emg_dlg.spin_bp_order.value() == 4
+assert emg_dlg.spin_lp_order.value() == 4
+assert len(emg_dlg.get_selected_channels()) >= 2
+print("EMGCustomFilterDialog defaults (BP 20-400Hz, LP 20Hz) and auto-selection verified!")
+
+# Verify Info tab specifications (1 decimal, no buttons)
+assert test_dlg.tabs.tabText(2) == "Info"
+test_dlg.set_active_tab(2)
+assert test_dlg.spin_scale.decimals() == 1
+assert test_dlg.spin_gen_scale.decimals() == 1
+assert test_dlg.spin_scale.buttonSymbols() == QAbstractSpinBox.NoButtons
+assert test_dlg.spin_gen_scale.buttonSymbols() == QAbstractSpinBox.NoButtons
+assert test_dlg.spin_offset.buttonSymbols() == QAbstractSpinBox.NoButtons
+assert test_dlg.spin_rate.buttonSymbols() == QAbstractSpinBox.NoButtons
+print("Info tab SCALE & GEN_SCALE 1-decimal and no-buttons configuration verified!")
+
+test_dlg.close()
+emg_dlg.close()
+
 print("\nALL ANALOG TOOLS & SIGNAL PROCESSING TESTS PASSED PERFECTLY!")
+

@@ -296,6 +296,12 @@ QSpinBox, QDoubleSpinBox {{
 QSpinBox:focus, QDoubleSpinBox:focus {{
     border: 1px solid {accent};
 }}
+QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{
+    color: {text};
+    background: transparent;
+    selection-background-color: {accent};
+    selection-color: #FFFFFF;
+}}
 
 /* Status Bar */
 QStatusBar {{

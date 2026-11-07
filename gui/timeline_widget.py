@@ -242,9 +242,9 @@ class TimelineWidget(QWidget):
         return int(round(ratio * (self.total_frames - 1)))
 
     def _draw_graduations(self, painter: QPainter, track: QRectF):
-        """Draw graduation ticks and numeric labels according to active display_mode (frame or time)."""
+        """Draw dense graduation ticks (major, medium, and fine sub-ticks) and numeric labels."""
         font = QFont(self.font())
-        font.setPointSize(9)
+        font.setPointSize(8)
         painter.setFont(font)
         painter.setPen(self.tick_color)
 
@@ -253,12 +253,12 @@ class TimelineWidget(QWidget):
             return
 
         if self.display_mode == "frame":
-            # Target ~8-14 ticks across timeline width
-            target_ticks = max(4, min(14, int(track_w / 65)))
+            # Dense major labeled ticks across timeline width
+            target_ticks = max(8, min(32, int(track_w / 42)))
             raw_step = max(1, self.total_frames / target_ticks)
 
             candidates = [
-                1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500,
+                1, 2, 5, 10, 15, 20, 25, 50, 100, 150, 200, 250, 500,
                 1000, 2000, 2500, 5000, 10000, 25000, 50000
             ]
             step_frames = candidates[-1]
@@ -267,50 +267,63 @@ class TimelineWidget(QWidget):
                     step_frames = c
                     break
 
-            # Minor sub-ticks
-            sub_step = 0
-            if step_frames >= 5:
-                if step_frames % 5 == 0:
-                    sub_step = step_frames // 5
-                elif step_frames % 2 == 0:
-                    sub_step = step_frames // 2
+            # Fine minor sub-ticks (10 subdivisions per major step when possible)
+            if step_frames >= 10 and step_frames % 10 == 0:
+                sub_step = step_frames // 10
+            elif step_frames >= 5 and step_frames % 5 == 0:
+                sub_step = step_frames // 5
+            elif step_frames >= 2:
+                sub_step = 1
+            else:
+                sub_step = 0
+
+            half_step = (step_frames // 2) if (step_frames >= 4 and step_frames % 2 == 0) else 0
 
             if sub_step > 0:
-                sub_pen = QPen(self.tick_color, 0.8)
-                sub_pen.setColor(QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 90))
-                painter.setPen(sub_pen)
+                sub_col = QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 145)
+                med_col = QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 195)
+                sub_pen = QPen(sub_col, 0.9)
+                med_pen = QPen(med_col, 1.0)
+
                 cur_sub = sub_step
                 while cur_sub <= self.total_frames:
                     if cur_sub % step_frames != 0 and cur_sub > 1:
                         xs = self._frame_to_x(cur_sub - 1)
-                        painter.drawLine(QPointF(xs, 17), QPointF(xs, 20))
+                        if half_step > 0 and (cur_sub % half_step == 0):
+                            painter.setPen(med_pen)
+                            painter.drawLine(QPointF(xs, 14.5), QPointF(xs, 21))
+                        else:
+                            painter.setPen(sub_pen)
+                            painter.drawLine(QPointF(xs, 16.5), QPointF(xs, 21))
                     cur_sub += sub_step
 
             # Major ticks and labels (starts from Frame 1)
-            painter.setPen(self.tick_color)
+            painter.setPen(QPen(self.tick_color, 1.1))
             x_first = self._frame_to_x(0)
-            painter.drawLine(QPointF(x_first, 13), QPointF(x_first, 20))
-            lbl_rect = QRectF(x_first - 28, 0, 56, 14)
+            painter.drawLine(QPointF(x_first, 12.5), QPointF(x_first, 21))
+            lbl_rect = QRectF(x_first - 22, 0, 44, 13)
             painter.drawText(lbl_rect, Qt.AlignCenter, "1")
 
+            last_lbl_x = x_first
             cur_f = step_frames
             while cur_f <= self.total_frames:
                 if cur_f > 1:
                     x = self._frame_to_x(cur_f - 1)
-                    if x - x_first > 34:
-                        painter.drawLine(QPointF(x, 13), QPointF(x, 20))
-                        lbl_rect = QRectF(x - 28, 0, 56, 14)
+                    painter.drawLine(QPointF(x, 12.5), QPointF(x, 21))
+                    if x - last_lbl_x >= 26:
+                        lbl_rect = QRectF(x - 24, 0, 48, 13)
                         painter.drawText(lbl_rect, Qt.AlignCenter, f"{cur_f}")
+                        last_lbl_x = x
                 cur_f += step_frames
 
         else:  # "time" (seconds)
             total_seconds = self.total_frames / self.point_rate if self.point_rate > 0 else 1.0
-            target_ticks = max(4, min(14, int(track_w / 75)))
+            target_ticks = max(8, min(30, int(track_w / 45)))
             raw_step_sec = total_seconds / target_ticks
 
             candidates = [
-                0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 5.0,
-                10.0, 20.0, 30.0, 60.0, 120.0, 300.0
+                0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1.0, 2.0, 5.0,
+                10.0, 15.0, 20.0, 30.0, 60.0, 120.0, 300.0
             ]
             step_sec = candidates[-1]
             for c in candidates:
@@ -318,29 +331,44 @@ class TimelineWidget(QWidget):
                     step_sec = c
                     break
 
-            # Minor sub-ticks
-            sub_sec = step_sec / 5.0 if step_sec >= 0.05 else (step_sec / 2.0)
+            # Fine minor sub-ticks (10 subdivisions per major step)
+            sub_sec = step_sec / 10.0
+            if sub_sec * self.point_rate < 1.0:
+                sub_sec = step_sec / 5.0
+            if sub_sec * self.point_rate < 1.0:
+                sub_sec = step_sec / 2.0
+
             if sub_sec * self.point_rate >= 1.0:
-                sub_pen = QPen(self.tick_color, 0.8)
-                sub_pen.setColor(QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 90))
-                painter.setPen(sub_pen)
-                t_sub = 0.0
-                while t_sub <= total_seconds + 1e-5:
+                sub_col = QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 145)
+                med_col = QColor(self.tick_color.red(), self.tick_color.green(), self.tick_color.blue(), 195)
+                sub_pen = QPen(sub_col, 0.9)
+                med_pen = QPen(med_col, 1.0)
+                n_sub = max(1, int(round(step_sec / sub_sec)))
+                total_sub_steps = int(total_seconds / sub_sec) + 1
+                for i_sub in range(1, total_sub_steps + 1):
+                    if i_sub % n_sub == 0:
+                        continue
+                    t_sub = i_sub * sub_sec
                     f_sub = int(round(t_sub * self.point_rate))
                     if f_sub < self.total_frames:
                         xs = self._frame_to_x(f_sub)
-                        painter.drawLine(QPointF(xs, 17), QPointF(xs, 20))
-                    t_sub += sub_sec
+                        if n_sub % 2 == 0 and (i_sub % (n_sub // 2) == 0):
+                            painter.setPen(med_pen)
+                            painter.drawLine(QPointF(xs, 14.5), QPointF(xs, 21))
+                        else:
+                            painter.setPen(sub_pen)
+                            painter.drawLine(QPointF(xs, 16.5), QPointF(xs, 21))
 
             # Major ticks and labels
-            painter.setPen(self.tick_color)
+            painter.setPen(QPen(self.tick_color, 1.1))
+            last_lbl_x = -100.0
             t = 0.0
             while t <= total_seconds + 1e-5:
                 f_major = int(round(t * self.point_rate))
                 if f_major >= self.total_frames:
                     break
                 x = self._frame_to_x(f_major)
-                painter.drawLine(QPointF(x, 13), QPointF(x, 20))
+                painter.drawLine(QPointF(x, 12.5), QPointF(x, 21))
 
                 if step_sec < 0.1:
                     lbl = f"{t:.2f}s"
@@ -351,8 +379,10 @@ class TimelineWidget(QWidget):
                 else:
                     lbl = f"{t:.1f}s"
 
-                lbl_rect = QRectF(x - 28, 0, 56, 14)
-                painter.drawText(lbl_rect, Qt.AlignCenter, lbl)
+                if x - last_lbl_x >= 30:
+                    lbl_rect = QRectF(x - 26, 0, 52, 13)
+                    painter.drawText(lbl_rect, Qt.AlignCenter, lbl)
+                    last_lbl_x = x
                 t += step_sec
 
     def paintEvent(self, event: QPaintEvent):
@@ -406,75 +436,52 @@ class TimelineWidget(QWidget):
             painter.setBrush(self.dim_color)
             painter.drawRect(dim_right)
 
-        # 5. Event Markers
+        # 5. Event Markers (Minimalistic hairline + small top pointer)
         for ev in self.events:
             ev_x = self._frame_to_x(ev.frame)
             ev_color = QColor(ev.icon_color)
+            is_ev_hovered = (self._hovered_event == ev)
 
-            # Draw vertical event line through track
-            painter.setPen(QPen(ev_color, 2))
-            painter.drawLine(QPointF(ev_x, 18), QPointF(ev_x, track.bottom() + 4))
+            # Thin vertical hairline through track
+            painter.setPen(QPen(ev_color, 1.6 if is_ev_hovered else 1.1))
+            painter.drawLine(QPointF(ev_x, 20), QPointF(ev_x, track.bottom() + 2))
 
-            # Draw top event flag/marker badge
+            # Minimalistic small top pointer triangle
+            r_half = 3.8 if is_ev_hovered else 3.0
             badge_poly = QPolygonF([
-                QPointF(ev_x, 18),
-                QPointF(ev_x - 5, 11),
-                QPointF(ev_x - 5, 6),
-                QPointF(ev_x + 5, 6),
-                QPointF(ev_x + 5, 11),
+                QPointF(ev_x, 21),
+                QPointF(ev_x - r_half, 15.5),
+                QPointF(ev_x + r_half, 15.5),
             ])
+            painter.setPen(Qt.NoPen)
             painter.setBrush(ev_color)
             painter.drawPolygon(badge_poly)
 
-            # Highlight if hovered
-            if self._hovered_event == ev:
-                painter.setPen(QPen(QColor("#FFFFFF") if self.is_dark else QColor("#1F2937"), 1))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(QPointF(ev_x, 24), 6, 6)
-
-        # 6. Trim Start Handle [ (In Point) - Thinner, semi-transparent, with center hairline
+        # 6. Trim Start Handle [ (In Point) - Simple white semi-transparent handler
         start_rect = self._trim_start_rect()
         is_start_act = self._trim_start_hovered or self._drag_mode == 'trim_start'
-        s_fill = QColor("#FFA726" if is_start_act else "#E69500")
-        s_fill.setAlpha(185 if is_start_act else 145)
-        painter.setPen(QPen(QColor("#FFE082" if is_start_act else "#FFB74D"), 1.2))
+        s_fill = QColor(255, 255, 255, 130 if is_start_act else 90)
+        s_border = QColor(255, 255, 255, 220 if is_start_act else 160) if self.is_dark else QColor(120, 130, 150, 200 if is_start_act else 150)
+        painter.setPen(QPen(s_border, 1.0))
         painter.setBrush(s_fill)
         painter.drawRoundedRect(start_rect, 2.5, 2.5)
 
-        # Pointer tab pointing right into active region
-        flag_s = QPolygonF([
-            QPointF(start_rect.right(), start_rect.top() - 2),
-            QPointF(start_rect.right() + 4, start_rect.top() + 3),
-            QPointF(start_rect.right(), start_rect.top() + 8)
-        ])
-        painter.drawPolygon(flag_s)
-
         # Center vertical hairline down the exact frame position
-        painter.setPen(QPen(QColor("#FFF3E0" if is_start_act else "#FFE082"), 1.0))
+        painter.setPen(QPen(s_border, 1.0))
         painter.drawLine(QPointF(x_start, start_rect.top() + 1), QPointF(x_start, start_rect.bottom() - 1))
-        painter.drawLine(QPointF(x_start, track.top() - 2), QPointF(x_start, track.bottom() + 2))
 
-        # 7. Trim End Handle ] (Out Point) - Thinner, semi-transparent, with center hairline
+        # 7. Trim End Handle ] (Out Point) - Simple white semi-transparent handler
         end_rect = self._trim_end_rect()
         is_end_act = self._trim_end_hovered or self._drag_mode == 'trim_end'
-        e_fill = QColor("#FF5722" if is_end_act else "#E64A19")
-        e_fill.setAlpha(185 if is_end_act else 145)
-        painter.setPen(QPen(QColor("#FFCCBC" if is_end_act else "#FF8A65"), 1.2))
+        e_fill = QColor(255, 255, 255, 130 if is_end_act else 90)
+        e_border = QColor(255, 255, 255, 220 if is_end_act else 160) if self.is_dark else QColor(120, 130, 150, 200 if is_end_act else 150)
+        painter.setPen(QPen(e_border, 1.0))
         painter.setBrush(e_fill)
         painter.drawRoundedRect(end_rect, 2.5, 2.5)
 
-        # Pointer tab pointing left into active region
-        flag_e = QPolygonF([
-            QPointF(end_rect.left(), end_rect.top() - 2),
-            QPointF(end_rect.left() - 4, end_rect.top() + 3),
-            QPointF(end_rect.left(), end_rect.top() + 8)
-        ])
-        painter.drawPolygon(flag_e)
-
         # Center vertical hairline down the exact frame position
-        painter.setPen(QPen(QColor("#FBE9E7" if is_end_act else "#FFCCBC"), 1.0))
+        painter.setPen(QPen(e_border, 1.0))
         painter.drawLine(QPointF(x_end, end_rect.top() + 1), QPointF(x_end, end_rect.bottom() - 1))
-        painter.drawLine(QPointF(x_end, track.top() - 2), QPointF(x_end, track.bottom() + 2))
 
         # 8. Playhead Scrubber Handle (Drawn on top) - Thinner, semi-transparent, with center frame hairline
         handle_x = curr_x

@@ -696,6 +696,79 @@ class UniversalPlotter(QWidget):
         # Refresh data on active curves
         self.update_data()
 
+    def refresh_force_plates(self):
+        """Update the Force Platforms tree branch and redraw active curves without resetting other groups."""
+        if not self.trial:
+            return
+
+        fp_root = None
+        for i in range(self.tree.topLevelItemCount()):
+            it = self.tree.topLevelItem(i)
+            if "Force Platforms" in it.text(0):
+                fp_root = it
+                break
+
+        checked_fp_labels = set()
+        if fp_root:
+            for i in range(fp_root.childCount()):
+                p_item = fp_root.child(i)
+                for j in range(p_item.childCount()):
+                    c = p_item.child(j)
+                    if c.checkState(0) == Qt.Checked:
+                        checked_fp_labels.add(c.text(0))
+
+        if not self.trial.force_platforms:
+            if fp_root:
+                idx = self.tree.indexOfTopLevelItem(fp_root)
+                self.tree.takeTopLevelItem(idx)
+            return
+
+        self.tree.blockSignals(True)
+        if fp_root is None:
+            fp_root = QTreeWidgetItem(["Force Platforms (Forces & Moments)"])
+            fp_root.setForeground(0, QColor("#FF9800"))
+            self.tree.insertTopLevelItem(min(1, self.tree.topLevelItemCount()), fp_root)
+
+        fp_root.takeChildren()
+        for fp in self.trial.force_platforms:
+            fp_item = QTreeWidgetItem([f"Force Platform #{fp.id}"])
+            fp_root.addChild(fp_item)
+
+            if fp.forces is not None:
+                for f_name, f_idx in [("Fx", 0), ("Fy", 1), ("Fz", 2), ("F_total", -1)]:
+                    lbl = f"FP{fp.id}_{f_name} (N)"
+                    c_item = QTreeWidgetItem([lbl])
+                    c_item.setFlags(c_item.flags() | Qt.ItemIsUserCheckable)
+                    c_item.setCheckState(0, Qt.Checked if lbl in checked_fp_labels else Qt.Unchecked)
+                    c_item.setData(0, Qt.UserRole, ("force", fp.id - 1, f_idx, f_name))
+                    fp_item.addChild(c_item)
+
+            if fp.moments is not None:
+                for m_name, m_idx in [("Mx", 0), ("My", 1), ("Mz", 2)]:
+                    lbl = f"FP{fp.id}_{m_name} (N.mm)"
+                    c_item = QTreeWidgetItem([lbl])
+                    c_item.setFlags(c_item.flags() | Qt.ItemIsUserCheckable)
+                    c_item.setCheckState(0, Qt.Checked if lbl in checked_fp_labels else Qt.Unchecked)
+                    c_item.setData(0, Qt.UserRole, ("moment", fp.id - 1, m_idx, m_name))
+                    fp_item.addChild(c_item)
+
+            if fp.cop is not None:
+                m_unit = getattr(self.trial, "marker_units", "mm") if self.trial else "mm"
+                cop_unit = "m" if m_unit.lower() in ("m", "meter", "meters") else "mm"
+                for cop_name, cop_idx in [("COP_x", 0), ("COP_y", 1), ("COP_z", 2)]:
+                    lbl = f"FP{fp.id}_{cop_name} ({cop_unit})"
+                    c_item = QTreeWidgetItem([lbl])
+                    c_item.setFlags(c_item.flags() | Qt.ItemIsUserCheckable)
+                    c_item.setCheckState(0, Qt.Checked if lbl in checked_fp_labels else Qt.Unchecked)
+                    c_item.setData(0, Qt.UserRole, ("cop", fp.id - 1, cop_idx, cop_name))
+                    fp_item.addChild(c_item)
+
+            fp_item.setExpanded(True)
+
+        self.tree.blockSignals(False)
+        fp_root.setExpanded(True)
+        self.update_data()
+
     # ---------------------------------------------------------
     # Tree Interaction & Filter
     # ---------------------------------------------------------
@@ -971,6 +1044,10 @@ class UniversalPlotter(QWidget):
             self._add_signal(label, role)
 
         self.auto_range()
+
+    def update_curves(self):
+        """Update existing curves from current trial data (alias for update_data)."""
+        self.update_data()
 
     # ---------------------------------------------------------
     # Programmatic Marker Plotting

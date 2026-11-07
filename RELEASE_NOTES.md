@@ -1,31 +1,53 @@
-# C3D Explorer v1.0.2 — Release Notes
+# C3D Explorer v1.1 — Release Notes
 
-**C3D Explorer v1.0.2** adds native **macOS Intel (`x86_64`)** standalone application support alongside **Apple Silicon (`arm64`)**, introduces architecture-aware in-app updates, and delivers robust multi-unit scaling support across the 3D OpenGL viewport and signal plotter.
+**C3D Explorer v1.1** introduces redesigned **Force Plate Ground Reaction Wrench (GRW)** workflows with persistent settings, unified **Analog Tools** with real-time specification tuning, batch pipeline processing, streamlined event styling, and enhanced 3D biomechanics visualization.
 
 ---
 
-### 🚀 What's New in v1.0.2
+### 🚀 What's New in v1.1
 
-#### 1. Native macOS Intel (`x86_64`) & Apple Silicon (`arm64`) Support
-- **Dual macOS Builds**:
-  - **`C3D_Explorer_Mac.dmg`**: Native ARM64 build optimized for Apple Silicon (M1, M2, M3, M4) Macs.
-  - **`C3D_Explorer_Mac_Intel.dmg`**: Native x86_64 build for Intel-based Macs (macOS Catalina 10.15 through macOS Sequoia).
-- **Universal Release Distribution**:
-  - GitHub Actions matrix workflow builds on native runners (`macos-14`) to guarantee maximum performance and binary compatibility.
-  - Automatically provisions both disk images as first-class GitHub Release assets.
+#### 1. Redesigned Force Plate GRW Calculation
+- **Automatic & Manual Calculation Modes**:
+  - **Automatic Calculation (Shimba 1984)**: Standard biomechanics algorithm for strain gauge and piezoelectric plates (Types 1, 2, and 4).
+  - **Manual Calculation**: Full manual control over calibration matrices (6x6), sensor offsets, corner coordinates, and channel mapping.
+- **COP Threshold (N)**:
+  - Renamed and simplified vertical force cutoff threshold to suppress noise during flight phases.
+  - User adjustments in manual mode are automatically remembered and restored across sessions.
+- **Enhanced 3D Labeling**: Larger, high-contrast force plate labels (FP1, FP2) in the 3D viewport.
 
-#### 2. Architecture-Aware In-App Updater
-- **Automated CPU Architecture Sensing**:
-  - The in-app updater (`Help -> Check for Updates...`) detects the host system's CPU architecture (`platform.machine()`).
-  - Users on Intel Macs automatically receive `C3D_Explorer_Mac_Intel.dmg`.
-  - Users on Apple Silicon Macs automatically receive `C3D_Explorer_Mac.dmg`.
-  - Windows users continue to receive the verified `C3D_Explorer_Windows_Setup.exe`.
+#### 2. Streamlined Analog Tools & Specifications
+- **Single Menu Entry**: Clean, unified entry under `Tools` → `Analog...`.
+- **Dedicated "Info" Specifications Tab**:
+  - Direct live editing of `SCALE`, `GEN_SCALE`, `OFFSET`, `Sampling Rate (Hz)`, and `Units`.
+  - One-decimal numeric precision with spinner arrow buttons removed for direct keyboard entry.
+  - Live **Combined Scale** readout (`SCALE × GEN_SCALE`).
+  - Changing scale factors (e.g., `-1.0` to `+1.0`) immediately updates analog channel values, inverts polarities, updates C3D metadata, and recalculates connected force plates.
+  - Complete **Undo / Redo** (`Ctrl+Z` / `Ctrl+Y`) integration.
 
-#### 3. Robust Unit Scaling Support (Meters & Millimeters)
-- **Automatic Unit Harmonization**:
-  - Full support for C3D files recorded with length units in meters (`m`) or millimeters (`mm`).
-  - Correctly auto-scales 3D marker coordinates, force plate corners, and ground reaction force vectors in the 3D viewport.
-  - Coordinates in the Universal Plotter and Data Explorer panel reflect consistent, accurate physical dimensions.
+#### 3. Automated Batch Processing Pipelines
+- **Batch Processing Dialog**:
+  - Apply automated processing across entire directories of C3D files.
+  - Multi-step pipelines: Butterworth filtering (LP/HP/BP), EMG envelopes, rectification, marker gap smoothing, and force plate recalculation.
+  - Export to C3D, CSV, and summary reports.
+
+#### 4. Event System & Minimalist UI Enhancements
+- **Consistent Event Context Coloring**:
+  - **Red** for Right-side events (`Right Foot Strike`, `Right Foot Off`).
+  - **Blue** for Left-side events (`Left Foot Strike`, `Left Foot Off`).
+  - **Amber** for General events (`Start`, `End`, custom).
+- **Minimalist Timeline Design**:
+  - Subtle semi-transparent timeline trim handles.
+  - Denser slider ticks for frame-accurate navigation.
+  - Fast event creation, editing, and persistence to C3D.
+
+#### 5. Marker Multi-Selection & Kinematics Tools
+- Shift-click multi-selection in marker lists and 3D viewport picking.
+- Batch color assignments and instant resetting.
+- Create Average Marker and Centroid Marker calculations.
+
+#### 6. Cross-Platform & Dark Theme Polish
+- Native dark mode high-contrast text rendering across all input fields on macOS and Windows.
+- 100% test pass rate across all unit and integration test suites.
 
 ---
 
@@ -37,5 +59,3 @@
 | **macOS (Intel)** | `C3D_Explorer_Mac_Intel.dmg` | Recommended for Intel-based Macs (x86_64) |
 | **Windows Installer** | `C3D_Explorer_Windows_Setup.exe` | Recommended for Windows 10/11 (64-bit Intel/AMD) |
 | **Windows Portable** | `C3D_Explorer_Windows_Portable.zip` | Standalone archive (no install required) |
-
-

@@ -1,6 +1,7 @@
 """Undo/Redo command classes for C3D Explorer using QUndoCommand."""
 
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
+import copy
 import numpy as np
 from PySide6.QtGui import QUndoCommand, QColor
 from core.data_models import C3DTrial, C3DEvent
@@ -212,13 +213,28 @@ class RenameMarkerCommand(QUndoCommand):
 class AddMarkerCommand(QUndoCommand):
     """Command to add a newly created/average/custom marker."""
 
-    def __init__(self, main_window, trial: C3DTrial, name: str, data: np.ndarray, color_rgba: Optional[tuple] = None):
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        name: str,
+        data: np.ndarray,
+        color_rgba: Optional[tuple] = None,
+        source_type: str = "manual",
+        source_file: str = "",
+        parent_markers: Optional[Tuple[str, str]] = None,
+        default_coords: Optional[Tuple[float, float, float]] = None
+    ):
         super().__init__(f"Add Marker '{name}'")
         self.mw = main_window
         self.trial = trial
         self.name = name
         self.data = data
         self.color_rgba = color_rgba
+        self.source_type = source_type
+        self.source_file = source_file
+        self.parent_markers = parent_markers
+        self.default_coords = default_coords
 
     def redo(self):
         if self.trial:
@@ -419,7 +435,9 @@ class FilterMarkersCommand(QUndoCommand):
         order: int,
         cutoff: float,
         old_markers: Dict[str, np.ndarray],
-        new_markers: Dict[str, np.ndarray]
+        new_markers: Dict[str, np.ndarray],
+        fs: float = 100.0,
+        zero_phase: bool = True
     ):
         super().__init__(f"Filter Markers (Order {order}, {cutoff:.1f} Hz)")
         self.mw = main_window
@@ -428,6 +446,8 @@ class FilterMarkersCommand(QUndoCommand):
         self.cutoff = cutoff
         self.old_markers = {k: v.copy() for k, v in old_markers.items()}
         self.new_markers = {k: v.copy() for k, v in new_markers.items()}
+        self.fs = fs
+        self.zero_phase = zero_phase
 
     def redo(self):
         if not self.trial:
@@ -471,7 +491,10 @@ class FilterAnalogChannelCommand(QUndoCommand):
         channel_name: str,
         old_data: np.ndarray,
         new_data: np.ndarray,
-        analog_dialog: Optional[Any] = None
+        analog_dialog: Optional[Any] = None,
+        filter_method: str = "Butterworth",
+        filter_order: Optional[int] = None,
+        cutoff: Optional[Any] = None
     ):
         super().__init__(f"Filter Analog Channel '{channel_name}'")
         self.mw = main_window
@@ -480,6 +503,9 @@ class FilterAnalogChannelCommand(QUndoCommand):
         self.old_data = old_data.copy()
         self.new_data = new_data.copy()
         self.analog_dialog = analog_dialog
+        self.filter_method = filter_method
+        self.filter_order = filter_order
+        self.cutoff = cutoff
 
     def redo(self):
         if not self.trial:
@@ -530,7 +556,10 @@ class AddAnalogChannelCommand(QUndoCommand):
         channel_name: str,
         data: np.ndarray,
         unit: str = "V",
-        analog_dialog: Optional[Any] = None
+        analog_dialog: Optional[Any] = None,
+        source_type: str = "manual",
+        source_file: str = "",
+        filter_details: Optional[Dict[str, Any]] = None
     ):
         super().__init__(f"Add Analog Channel '{channel_name}'")
         self.mw = main_window
@@ -539,6 +568,9 @@ class AddAnalogChannelCommand(QUndoCommand):
         self.data = data.copy()
         self.unit = unit
         self.analog_dialog = analog_dialog
+        self.source_type = source_type
+        self.source_file = source_file
+        self.filter_details = filter_details
 
     def redo(self):
         if not self.trial:
@@ -684,4 +716,284 @@ class RenameAnalogChannelCommand(QUndoCommand):
                 self.mw.plotter_widget.refresh_analogs()
             else:
                 self.mw.plotter_widget.load_trial(self.trial)
+
+
+class FilterMultipleAnalogChannelsCommand(QUndoCommand):
+    """Command to filter or overwrite multiple analog channels simultaneously."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        old_data_dict: Dict[str, np.ndarray],
+        new_data_dict: Dict[str, np.ndarray],
+        analog_dialog: Optional[Any] = None,
+        description: str = "Filter Multiple Analog Channels",
+        method: str = "",
+        details: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(description)
+        self.mw = main_window
+        self.trial = trial
+        self.old_data = {k: v.copy() for k, v in old_data_dict.items()}
+        self.new_data = {k: v.copy() for k, v in new_data_dict.items()}
+        self.analog_dialog = analog_dialog
+        self.channels = list(new_data_dict.keys())
+        self.method = method
+        self.details = details or {}
+
+    def redo(self):
+        if not self.trial:
+            return
+        for k, v in self.new_data.items():
+            self.trial.analogs[k] = v.copy()
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(
+                f"Applied filter to {len(self.new_data)} analog channels",
+                3500
+            )
+
+    def undo(self):
+        if not self.trial:
+            return
+        for k, v in self.old_data.items():
+            self.trial.analogs[k] = v.copy()
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(
+                f"Undid filter on {len(self.old_data)} analog channels, restored original signals",
+                3500
+            )
+
+    def _refresh(self):
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg and hasattr(dlg, "_populate_channel_table"):
+            dlg._populate_channel_table()
+            if hasattr(dlg, "_update_filter_preview"):
+                dlg._update_filter_preview()
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "update_data"):
+                self.mw.plotter_widget.update_data()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+
+
+class AddMultipleAnalogChannelsCommand(QUndoCommand):
+    """Command to add multiple new analog channels simultaneously."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        channel_dict: Dict[str, np.ndarray],
+        unit_dict: Optional[Dict[str, str]] = None,
+        analog_dialog: Optional[Any] = None,
+        description: str = "Add Multiple Analog Channels"
+    ):
+        super().__init__(description)
+        self.mw = main_window
+        self.trial = trial
+        self.channel_dict = {k: v.copy() for k, v in channel_dict.items()}
+        self.unit_dict = dict(unit_dict or {})
+        self.analog_dialog = analog_dialog
+        self.channels = list(channel_dict.keys())
+
+    def redo(self):
+        if not self.trial:
+            return
+        for k, v in self.channel_dict.items():
+            self.trial.analogs[k] = v.copy()
+            if k in self.unit_dict:
+                self.trial.analog_units[k] = self.unit_dict[k]
+        self._refresh(is_add=True)
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Added {len(self.channel_dict)} new analog channels", 3500)
+
+    def undo(self):
+        if not self.trial:
+            return
+        for k in self.channel_dict.keys():
+            self.trial.analogs.pop(k, None)
+            self.trial.analog_units.pop(k, None)
+        self._refresh(is_add=False)
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(f"Undid adding {len(self.channel_dict)} analog channels", 3500)
+
+    def _refresh(self, is_add: bool):
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg and hasattr(dlg, "_populate_channel_table"):
+            dlg._populate_channel_table()
+            if hasattr(dlg, "_populate_filter_channels"):
+                dlg._populate_filter_channels()
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "refresh_analogs"):
+                self.mw.plotter_widget.refresh_analogs()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+
+
+class ConfigureForcePlateCommand(QUndoCommand):
+    """Command to calculate or update force platform parameters and ground reaction wrenches."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        old_platforms: List[Any],
+        new_platforms: List[Any],
+        description: str = "Configure Force Plate",
+        pipeline_params: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__(description)
+        self.mw = main_window
+        self.trial = trial
+        self.old_platforms = [fp.clone() for fp in old_platforms]
+        self.new_platforms = [fp.clone() for fp in new_platforms]
+        self.description = description
+        self.pipeline_params = dict(pipeline_params or {})
+
+    def redo(self):
+        if not self.trial:
+            return
+        self.trial.force_platforms = [fp.clone() for fp in self.new_platforms]
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage(self.description, 3500)
+
+    def undo(self):
+        if not self.trial:
+            return
+        self.trial.force_platforms = [fp.clone() for fp in self.old_platforms]
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage("Undid force plate configuration, restored previous forces", 3500)
+
+    def _refresh(self):
+        if not self.mw:
+            return
+        cur_frame = getattr(self.mw.playback, "current_frame", 0) if hasattr(self.mw, "playback") else 0
+        if hasattr(self.mw, "viewer_3d") and self.mw.viewer_3d:
+            self.mw.viewer_3d._rebuild_force_plates()
+            self.mw.viewer_3d.set_frame(cur_frame)
+        if hasattr(self.mw, "side_panel") and self.mw.side_panel:
+            self.mw.side_panel._populate_force_plates()
+            self.mw.side_panel.update_live_values(cur_frame)
+        if hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "refresh_force_plates"):
+                self.mw.plotter_widget.refresh_force_plates()
+            elif hasattr(self.mw.plotter_widget, "update_data"):
+                self.mw.plotter_widget.update_data()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+        if hasattr(self.mw, "_update_status_stats"):
+            self.mw._update_status_stats()
+
+
+class UpdateAnalogSpecificationsCommand(QUndoCommand):
+    """Command to update analog global parameters (GEN_SCALE, RATE) and channel specifications (SCALE, OFFSET, UNITS)."""
+
+    def __init__(
+        self,
+        main_window,
+        trial: C3DTrial,
+        old_analogs: Dict[str, np.ndarray],
+        new_analogs: Dict[str, np.ndarray],
+        old_units: Dict[str, str],
+        new_units: Dict[str, str],
+        old_meta: Dict[str, Any],
+        new_meta: Dict[str, Any],
+        old_rate: float,
+        new_rate: float,
+        old_subsamples: int,
+        new_subsamples: int,
+        old_force_platforms: Optional[List[Any]] = None,
+        new_force_platforms: Optional[List[Any]] = None,
+        analog_dialog: Optional[Any] = None,
+        description: str = "Update Analog Specifications"
+    ):
+        super().__init__(description)
+        self.mw = main_window
+        self.trial = trial
+        self.old_analogs = {k: v.copy() for k, v in old_analogs.items()}
+        self.new_analogs = {k: v.copy() for k, v in new_analogs.items()}
+        self.old_units = dict(old_units)
+        self.new_units = dict(new_units)
+        self.old_meta = copy.deepcopy(old_meta) if old_meta else {}
+        self.new_meta = copy.deepcopy(new_meta) if new_meta else {}
+        self.old_rate = float(old_rate)
+        self.new_rate = float(new_rate)
+        self.old_subsamples = int(old_subsamples)
+        self.new_subsamples = int(new_subsamples)
+        self.old_fp = [fp.clone() for fp in old_force_platforms] if old_force_platforms else []
+        self.new_fp = [fp.clone() for fp in new_force_platforms] if new_force_platforms else []
+        self.analog_dialog = analog_dialog
+
+    def redo(self):
+        if not self.trial:
+            return
+        self.trial.analogs = {k: v.copy() for k, v in self.new_analogs.items()}
+        self.trial.analog_units = dict(self.new_units)
+        self.trial.analog_rate = self.new_rate
+        self.trial.analog_subsamples = self.new_subsamples
+        if "ANALOG" in self.trial.metadata:
+            self.trial.metadata["ANALOG"] = copy.deepcopy(self.new_meta)
+        if self.new_fp:
+            self.trial.force_platforms = [fp.clone() for fp in self.new_fp]
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage("Applied updated analog specifications", 3500)
+
+    def undo(self):
+        if not self.trial:
+            return
+        self.trial.analogs = {k: v.copy() for k, v in self.old_analogs.items()}
+        self.trial.analog_units = dict(self.old_units)
+        self.trial.analog_rate = self.old_rate
+        self.trial.analog_subsamples = self.old_subsamples
+        if "ANALOG" in self.trial.metadata:
+            self.trial.metadata["ANALOG"] = copy.deepcopy(self.old_meta)
+        if self.old_fp:
+            self.trial.force_platforms = [fp.clone() for fp in self.old_fp]
+        self._refresh()
+        if self.mw and hasattr(self.mw, "status"):
+            self.mw.status.showMessage("Undid analog specifications update", 3500)
+
+    def _refresh(self):
+        cur_frame = getattr(self.mw.playback, "current_frame", 0) if (self.mw and hasattr(self.mw, "playback")) else 0
+        dlg = self.analog_dialog or (getattr(self.mw, "analog_dialog", None) if self.mw else None)
+        if dlg:
+            if hasattr(dlg, "_populate_channel_table"):
+                dlg._populate_channel_table()
+            if hasattr(dlg, "_populate_filter_channels"):
+                dlg._populate_filter_channels()
+            if hasattr(dlg, "_populate_info_tab"):
+                dlg._populate_info_tab()
+            if hasattr(dlg, "_update_footer_info"):
+                dlg._update_footer_info()
+            if hasattr(dlg, "_update_undo_redo_actions"):
+                dlg._update_undo_redo_actions()
+        if self.mw and hasattr(self.mw, "plotter_widget") and self.mw.plotter_widget:
+            if hasattr(self.mw.plotter_widget, "refresh_analogs"):
+                self.mw.plotter_widget.refresh_analogs()
+            else:
+                self.mw.plotter_widget.load_trial(self.trial)
+        if self.mw and hasattr(self.mw, "viewer_3d") and self.mw.viewer_3d:
+            self.mw.viewer_3d._rebuild_force_plates()
+            self.mw.viewer_3d.set_frame(cur_frame)
+        if self.mw and hasattr(self.mw, "side_panel") and self.mw.side_panel:
+            self.mw.side_panel._populate_force_plates()
+            self.mw.side_panel.update_live_values(cur_frame)
+        if self.mw and hasattr(self.mw, "_update_status_stats"):
+            self.mw._update_status_stats()
+
+
 

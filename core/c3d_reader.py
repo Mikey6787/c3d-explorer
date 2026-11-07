@@ -16,27 +16,15 @@ from core.grw_calculator import compute_ground_reaction_wrenches
 
 
 def get_event_color(label: str, context: str) -> str:
-    """Return a color for an event based on context and label."""
-    norm = (label + " " + context).lower()
-    if "right" in norm or norm.startswith("r_"):
-        if "strike" in norm or "contact" in norm or "hs" in norm:
-            return "#E53935"  # Vivid Red (Right Foot Strike)
-        elif "off" in norm or "to" in norm:
-            return "#FB8C00"  # Orange (Right Foot Off)
-        return "#FF7043"
-    elif "left" in norm or norm.startswith("l_"):
-        if "strike" in norm or "contact" in norm or "hs" in norm:
-            return "#1E88E5"  # Vivid Blue (Left Foot Strike)
-        elif "off" in norm or "to" in norm:
-            return "#00ACC1"  # Cyan (Left Foot Off)
-        return "#42A5F5"
+    """Return a single consistent color per event context: Left, Right, or General."""
+    ctx_low = (context or "").strip().lower()
+    lbl_low = (label or "").strip().lower()
+    if ctx_low == "right" or "right" in ctx_low or (not ctx_low and ("right" in lbl_low or lbl_low.startswith("r_") or lbl_low in ("rhs", "rto", "rfs", "rfo"))):
+        return "#EF5350"  # Single color for Right (Red)
+    elif ctx_low == "left" or "left" in ctx_low or (not ctx_low and ("left" in lbl_low or lbl_low.startswith("l_") or lbl_low in ("lhs", "lto", "lfs", "lfo"))):
+        return "#29B6F6"  # Single color for Left (Blue)
     else:
-        # General / Event
-        if "start" in norm:
-            return "#43A047"  # Green
-        elif "end" in norm or "stop" in norm:
-            return "#8E24AA"  # Purple
-        return "#FDD835"      # Amber
+        return "#FFCA28"  # Single color for General (Amber)
 
 
 class C3DReader:
@@ -191,13 +179,16 @@ class C3DReader:
 
                 # Channel map
                 chan_map = {}
+                chan_names = []
                 if channels_all is not None:
                     ch_col = channels_all[:, i] if channels_all.ndim == 2 else channels_all
+                    analog_keys = list(analogs_dict.keys())
                     for ch_idx, ch_num in enumerate(ch_col):
                         c_num_int = int(ch_num)
-                        if 1 <= c_num_int <= len(analogs_dict):
-                            ch_lbl = list(analogs_dict.keys())[c_num_int - 1]
+                        if 1 <= c_num_int <= len(analog_keys):
+                            ch_lbl = analog_keys[c_num_int - 1]
                             chan_map[f"Ch_{ch_idx+1}"] = analogs_dict[ch_lbl]
+                            chan_names.append(ch_lbl)
 
                 # Forces, Moments, COP from Shimba algorithm
                 forces = None
@@ -227,7 +218,8 @@ class C3DReader:
                     forces=forces,
                     moments=moments,
                     cop=cop,
-                    cal_matrix=cal_mat
+                    cal_matrix=cal_mat,
+                    channel_names=chan_names
                 ))
         except Exception as e:
             print(f"Warning parsing force platforms with ezc3d: {e}")
@@ -386,7 +378,7 @@ class C3DReader:
         except Exception as e:
             print(f"Warning parsing metadata with ezc3d: {e}")
 
-        return C3DTrial(
+        trial = C3DTrial(
             file_path=file_path,
             first_frame=first_frame,
             last_frame=last_frame,
@@ -404,3 +396,7 @@ class C3DReader:
             metadata=metadata_tree,
             btk_handle=c  # Stores ezc3d object reference for saving/exporting
         )
+        if 'ANALOG' in metadata_tree:
+            import copy
+            trial._c3d_default_analog_meta = copy.deepcopy(metadata_tree['ANALOG'])
+        return trial

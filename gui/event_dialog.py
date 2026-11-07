@@ -103,7 +103,7 @@ class EventEditDialog(QDialog):
         self.combo_context = QComboBox()
         self.combo_context.setEditable(True)
         self.combo_context.setMinimumWidth(260)
-        self.combo_context.addItems(["Right", "Left", "General"])
+        self.combo_context.addItems(["Left", "Right", "General"])
         self.combo_context.currentTextChanged.connect(self._on_context_changed)
         form.addRow("<b>Context / Leg:</b>", self.combo_context)
 
@@ -333,7 +333,7 @@ class EventManagerDialog(QDialog):
         self.table = QTableWidget()
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels([
-            "Event", "Time (s)", "Frame", "Subject", "Description"
+            "Event", "Time (s)", "Frame", "Context", "Description"
         ])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -419,9 +419,47 @@ class EventManagerDialog(QDialog):
             f_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row, 2, f_item)
 
-            # Subject
-            subj_item = QTableWidgetItem(getattr(ev, "subject", "") or "")
-            self.table.setItem(row, 3, subj_item)
+            # Context (Left, Right, or General)
+            raw_ctx = (getattr(ev, "context", "") or "").strip()
+            if raw_ctx.lower() == "left":
+                ctx_display = "Left"
+            elif raw_ctx.lower() == "right":
+                ctx_display = "Right"
+            elif raw_ctx.lower() in ("general", ""):
+                ctx_display = "General"
+            else:
+                ctx_display = raw_ctx
+
+            ctx_item = QTableWidgetItem(ctx_display)
+            self.table.setItem(row, 3, ctx_item)
+
+            # Dropdown combobox for direct in-table selection of Context
+            combo_ctx = QComboBox()
+            combo_ctx.addItems(["Left", "Right", "General"])
+            if ctx_display in ["Left", "Right", "General"]:
+                combo_ctx.setCurrentText(ctx_display)
+            else:
+                combo_ctx.addItem(ctx_display)
+                combo_ctx.setCurrentText(ctx_display)
+            combo_ctx.setStyleSheet(
+                "QComboBox { padding: 2px 6px; border-radius: 3px; font-size: 11px; min-width: 80px; }"
+            )
+
+            def _make_ctx_callback(event_obj, item_obj, r_idx):
+                def _on_ctx_changed(new_val):
+                    if getattr(event_obj, "context", "") != new_val:
+                        event_obj.context = new_val
+                        item_obj.setText(new_val)
+                        new_col = get_event_color(event_obj.name, new_val)
+                        event_obj.icon_color = new_col
+                        n_it = self.table.item(r_idx, 0)
+                        if n_it:
+                            n_it.setForeground(QBrush(QColor(new_col)))
+                        self.eventListChanged.emit()
+                return _on_ctx_changed
+
+            combo_ctx.currentTextChanged.connect(_make_ctx_callback(ev, ctx_item, row))
+            self.table.setCellWidget(row, 3, combo_ctx)
 
             # Description
             desc_item = QTableWidgetItem(getattr(ev, "description", "") or "")
