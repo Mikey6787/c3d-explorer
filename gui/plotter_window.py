@@ -831,6 +831,8 @@ class UniversalPlotter(QWidget):
             self._add_signal(label, role_data)
         else:
             self._remove_signal(label)
+            if self.active_curves:
+                self.auto_range()
 
         # Update parent marker item checkbox state if this is a marker component
         parent = item.parent()
@@ -1631,10 +1633,8 @@ class UniversalPlotter(QWidget):
                         all_y_min = min(all_y_min, float(np.min(valid)))
                         all_y_max = max(all_y_max, float(np.max(valid)))
 
-        if all_y_min < all_y_max:
-            y_span = all_y_max - all_y_min
-            pad_y = max(1.0, y_span * 0.08)
-            self.plot_widget.getPlotItem().setYRange(all_y_min - pad_y, all_y_max + pad_y, padding=0.0)
+        if all_y_min <= all_y_max and all_y_min < float("inf"):
+            self._apply_y_range(all_y_min, all_y_max)
         elif not is_trimmed:
             self.auto_range()
 
@@ -1743,6 +1743,15 @@ class UniversalPlotter(QWidget):
                 self.time_cursor.label.updatePosition()
         self.timeCursorMoved.emit(t)
 
+    def _apply_y_range(self, y_min: float, y_max: float):
+        """Apply proportional Y-axis padding for both small-amplitude analogs and large signals."""
+        y_span = y_max - y_min
+        if y_span > 0:
+            pad_y = max(y_span * 0.08, 1e-9)
+        else:
+            pad_y = max(abs(y_min) * 0.1, 1e-4)
+        self.plot_widget.getPlotItem().setYRange(y_min - pad_y, y_max + pad_y, padding=0.0)
+
     def auto_range(self):
         """Fit plot to curves."""
         if not self.active_curves or not self.curve_data:
@@ -1766,11 +1775,9 @@ class UniversalPlotter(QWidget):
                     all_x_min = min(all_x_min, float(x[0]))
                     all_x_max = max(all_x_max, float(x[-1]))
 
-        if all_x_min < all_x_max and all_y_min < all_y_max:
+        if all_x_min < all_x_max and all_y_min <= all_y_max and all_y_min < float("inf"):
             self.plot_widget.getPlotItem().setXRange(all_x_min, all_x_max, padding=0.03)
-            y_span = all_y_max - all_y_min
-            pad_y = max(1.0, y_span * 0.08)
-            self.plot_widget.getPlotItem().setYRange(all_y_min - pad_y, all_y_max + pad_y, padding=0.0)
+            self._apply_y_range(all_y_min, all_y_max)
         else:
             self.plot_widget.autoRange()
 
