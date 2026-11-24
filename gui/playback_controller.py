@@ -16,6 +16,8 @@ class PlaybackController(QObject):
         super().__init__(parent)
         self.total_frames: int = 100
         self.current_frame: int = 0
+        self.play_start_frame: int = 0
+        self.play_end_frame: int = 99
         self.point_rate: float = 100.0
         self.speed: float = 1.0
         self.is_looping: bool = True
@@ -33,7 +35,19 @@ class PlaybackController(QObject):
         self.pause()
         self.total_frames = max(1, total_frames)
         self.point_rate = max(1.0, point_rate)
+        self.play_start_frame = 0
+        self.play_end_frame = self.total_frames - 1
         self.current_frame = 0
+
+    def set_play_range(self, start_frame: int, end_frame: int):
+        """Restrict playback to the given inclusive [start_frame, end_frame] ROI."""
+        start_f = max(0, min(self.total_frames - 1, int(start_frame)))
+        end_f = max(start_f, min(self.total_frames - 1, int(end_frame)))
+        self.play_start_frame = start_f
+        self.play_end_frame = end_f
+
+        if self.is_playing and (self.current_frame < start_f or self.current_frame > end_f):
+            self.set_frame(start_f)
 
     def set_speed(self, speed: float):
         """Set playback speed multiplier (e.g. 0.1, 0.25, 0.5, 1.0, 2.0)."""
@@ -59,11 +73,11 @@ class PlaybackController(QObject):
             self._start_frame = self.current_frame
 
     def play(self):
-        """Start animation playback."""
+        """Start animation playback within the active ROI."""
         if self.is_playing:
             return
-        if self.current_frame >= self.total_frames - 1:
-            self.current_frame = 0
+        if self.current_frame < self.play_start_frame or self.current_frame >= self.play_end_frame:
+            self.current_frame = self.play_start_frame
             self.frameChanged.emit(self.current_frame)
 
         self._start_perf_time = time.perf_counter()
@@ -81,9 +95,9 @@ class PlaybackController(QObject):
         self.playbackStateChanged.emit(False)
 
     def stop(self):
-        """Stop playback and return to first frame."""
+        """Stop playback and return to ROI start frame."""
         self.pause()
-        self.set_frame(0)
+        self.set_frame(self.play_start_frame)
 
     def toggle_play_pause(self):
         """Toggle between play and pause."""
@@ -105,15 +119,23 @@ class PlaybackController(QObject):
         self.set_frame(prev_frame)
 
     def jump_to_start(self):
-        """Jump to frame 0."""
-        self.set_frame(0)
+        """Jump to ROI start frame."""
+        self.set_frame(self.play_start_frame)
 
     def jump_to_end(self):
-        """Jump to final frame."""
-        self.set_frame(self.total_frames - 1)
+        """Jump to ROI final frame."""
+        self.set_frame(self.play_end_frame)
 
     def _on_timer_tick(self):
         if not self.is_playing or self.total_frames <= 1:
+            return
+
+        if self.play_end_frame <= self.play_start_frame:
+            if self.current_frame != self.play_start_frame:
+                self.current_frame = self.play_start_frame
+                self.frameChanged.emit(self.current_frame)
+            if not self.is_looping:
+                self.pause()
             return
 
         now = time.perf_counter()
@@ -122,13 +144,13 @@ class PlaybackController(QObject):
 
         next_frame = self._start_frame + frames_advanced
 
-        if next_frame >= self.total_frames:
+        if next_frame > self.play_end_frame:
             if self.is_looping:
                 self._start_perf_time = now
-                self._start_frame = 0
-                next_frame = 0
+                self._start_frame = self.play_start_frame
+                next_frame = self.play_start_frame
             else:
-                self.current_frame = self.total_frames - 1
+                self.current_frame = self.play_end_frame
                 self.frameChanged.emit(self.current_frame)
                 self.pause()
                 return

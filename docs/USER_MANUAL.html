@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>C3D Explorer — Complete User Manual (v1.1)</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #008c9e;
+      --accent-soft: #e0f7fa;
+      --badge: #d93025;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 270px 1fr;
+      min-height: 100vh;
+    }
+    aside {
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      padding: 24px 16px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .brand {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 2px;
+    }
+    .version {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 18px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    nav a {
+      display: block;
+      padding: 7px 10px;
+      border-radius: 6px;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 13.5px;
+      margin-bottom: 3px;
+    }
+    nav a:hover {
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    main {
+      max-width: 1060px;
+      padding: 34px 42px;
+    }
+    header.doc-header {
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 16px;
+      margin-bottom: 26px;
+    }
+    header.doc-header h1 {
+      margin: 0 0 6px 0;
+      font-size: 28px;
+    }
+    .notice {
+      background: var(--accent-soft);
+      border-left: 4px solid var(--accent);
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      margin-bottom: 26px;
+    }
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px 28px;
+      margin-bottom: 28px;
+      page-break-inside: avoid;
+    }
+    section h2 {
+      margin-top: 0;
+      color: var(--accent);
+      font-size: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    figure {
+      margin: 16px 0;
+      text-align: center;
+    }
+    figure img {
+      max-width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+    }
+    figcaption {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 6px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 13.5px;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 9px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      font-weight: 600;
+    }
+    .badge {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      line-height: 24px;
+      text-align: center;
+      border-radius: 50%;
+      background: var(--badge);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    code, kbd {
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 12.5px;
+    }
+    ul.compact { margin: 8px 0 0 18px; padding: 0; }
+    ul.compact li { margin-bottom: 5px; font-size: 14px; }
+    @media print {
+      aside { display: none; }
+      .layout { display: block; }
+      main { max-width: 100%; padding: 0; }
+      body { background: #ffffff; }
+      section { border: none; padding: 10px 0; margin-bottom: 18px; }
+      .notice { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand">C3D Explorer</div>
+      <div class="version">User Manual &bull; v1.1</div>
+      <nav>
+        <a href="#workspace">1. Main Workspace &amp; 3D View</a>
+        <a href="#plotter">2. Universal Signal Plotter</a>
+        <a href="#forceplate">3. Force Plate GRW</a>
+        <a href="#analog-filter">4. Analog &amp; EMG Filtering</a>
+        <a href="#analog-info">5. Analog Info &amp; Scaling</a>
+        <a href="#markers">6. Marker &amp; HJC Tools</a>
+        <a href="#events">7. Event Management</a>
+        <a href="#opensim">8. Export for OpenSim</a>
+        <a href="#batch">9. Batch Processing</a>
+        <a href="#settings">10. Settings &amp; Themes</a>
+        <a href="#shortcuts">11. Keyboard Shortcuts</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="doc-header">
+        <h1>C3D Explorer — User Manual</h1>
+        <p style="color: var(--muted); margin: 0;">Complete visual reference for biomechanics 3D inspection, force plate GRW, EMG/analog filtering, OpenSim export, and batch automation.</p>
+      </header>
+
+      <div class="notice">
+        <strong>Tip:</strong> Use the left navigation bar to jump to any module, or press <kbd>Cmd+P</kbd> / <kbd>Ctrl+P</kbd> in your browser to save this manual as a formatted PDF.
+      </div>
+
+      <section id="workspace">
+        <h2>1. Main Workspace &amp; 3D Viewport</h2>
+        <p>Open any C3D file via <code>File → Open...</code> or drag-and-drop it into the window to inspect 3D markers, force platforms, live GRF vectors, and synchronized events.</p>
+        <figure>
+          <img src="images/01_main_workspace.png" alt="Main Workspace" />
+          <figcaption>Figure 1 — Main workspace in Clinical Light theme (<code>P01_PRE_L_BML_01.c3d</code>).</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Component</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>3D OpenGL Viewport</strong></td><td>Renders 3D markers, force plates (<code>FP 1</code>, <code>FP 2</code>), and Ground Reaction Force (GRF) vectors. Left-drag to orbit, scroll/right-drag to zoom, middle-drag to pan, and click markers to select.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Data Explorer Panel</strong></td><td>Switch between <strong>Markers</strong> (search, visibility checkboxes, batch color, delete), <strong>Force Plates</strong> (live Fx/Fy/Fz &amp; COP values), and <strong>Events</strong> (click to jump, edit, delete).</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Playback Controls</strong></td><td>Play/pause (<kbd>Space</kbd>), step frames (<kbd>←</kbd>/<kbd>→</kbd>), set speed (<code>0.1x</code>–<code>2.0x</code>), toggle <strong>Loop</strong>, and switch between <strong>Frame</strong> and <strong>Time (s)</strong>.</td></tr>
+            <tr><td><span class="badge">4</span></td><td><strong>Timeline, Events &amp; Trim ROI</strong></td><td>Scrub frames, inspect color-coded gait events (Red = Right, Blue = Left, Amber = General), and drag <strong>Trim Start [</strong> / <strong>Trim End ]</strong> handles to constrain playback and exports to the active Region of Interest.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="plotter">
+        <h2>2. Universal Signal &amp; Marker Plotter</h2>
+        <p>Open via <code>Tools → Plotter...</code> (<kbd>Ctrl+P</kbd> / <kbd>Cmd+P</kbd>) or <code>View → Panels → Plotter</code> to inspect synchronized marker trajectories, force plate channels, and analog/EMG waveforms.</p>
+        <figure>
+          <img src="images/02_universal_plotter.png" alt="Universal Plotter" />
+          <figcaption>Figure 2 — Universal Plotter displaying 3D marker coordinates and synchronized frame cursor.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Search Signals</strong></td><td>Filter the signal tree in real time by marker, force platform, or analog channel name.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Signal Tree</strong></td><td>Check individual components or check a parent marker to plot <code>X</code>, <code>Y</code>, and <code>Z</code> together.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Frame / Time Toggle</strong></td><td>Switch the horizontal axis between <strong>Frame Number</strong> and <strong>Time (seconds)</strong>.</td></tr>
+            <tr><td><span class="badge">4</span></td><td><strong>Fit ROI / Fit Full</strong></td><td>Auto-fit axes to the trimmed ROI or full trial. Analog channels automatically scale proportionally to their amplitude.</td></tr>
+            <tr><td><span class="badge">5</span></td><td><strong>Interactive Plot &amp; Events</strong></td><td>Shows synchronized playback cursor, event dashed lines, hover readouts, and direct axis-drag/scroll zooming.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="forceplate">
+        <h2>3. Force Plate Ground Reaction Wrench (GRW)</h2>
+        <p>Open via <code>Tools → Force Plate...</code> to inspect or recalculate Ground Reaction Forces, moments, and Center of Pressure (COP).</p>
+        <figure>
+          <img src="images/03_force_plate_grw.png" alt="Force Plate GRW Dialog" />
+          <figcaption>Figure 3 — Force Plate GRW configuration dialog.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Select Force Plate</strong></td><td>Choose which force platform in the trial to configure.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Calculation Method</strong></td><td>Choose <strong>Automatic calculation (Shimba 1984)</strong> or <strong>Manual calculation</strong> (edit plate type 1–4, channel mapping, corners, origin offset, and 6×6 calibration matrix). Manual settings persist across sessions.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>COP Threshold (N)</strong></td><td>Minimum vertical force (<code>|Fz|</code>) required for COP calculation. Values below this threshold suppress COP noise during unloaded/flight phases.</td></tr>
+            <tr><td><span class="badge">4</span></td><td><strong>Calculate &amp; Apply Forces</strong></td><td>Recomputes GRF, moments, and COP for the platform and updates the 3D scene and plotter.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="analog-filter">
+        <h2>4. Analog Channels &amp; EMG Signal Processing</h2>
+        <p>Open via <code>Tools → Analog...</code> to rename, delete, import (CSV/TXT/XLSX), or apply zero-phase digital filters and EMG envelopes.</p>
+        <figure>
+          <img src="images/04_analog_emg_filter.png" alt="Analog EMG Filter Tab" />
+          <figcaption>Figure 4 — Analog Tools Filter tab with Moving RMS Envelope preview (<code>emg.c3d</code>).</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Analog Tabs</strong></td><td>Switch between <strong>Channels Manager</strong>, <strong>Filter</strong>, and <strong>Info</strong>.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Select Channels</strong></td><td>Multi-select dropdown plus one-click <strong>All EMG</strong>, <strong>Select All</strong>, and <strong>Clear</strong> buttons.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Filter Method</strong></td><td>Choose <strong>Butterworth Low-pass / High-pass / Band-pass / Notch</strong>, <strong>Full-Wave Rectification</strong>, <strong>Moving RMS Envelope</strong>, or <strong>EMG custom</strong> (20–400 Hz BP + Rectify + 20 Hz LP).</td></tr>
+            <tr><td><span class="badge">4</span></td><td><strong>Apply Filter</strong></td><td>Save the result as a new channel or overwrite the original channel with full Undo/Redo support.</td></tr>
+            <tr><td><span class="badge">5</span></td><td><strong>Live Signal Preview</strong></td><td>Overlays the <strong>Raw</strong> signal and <strong>Processed</strong> output alongside live RMS and Peak-to-Peak (P2P) metrics.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="analog-info">
+        <h2>5. Analog Specifications (Info Tab)</h2>
+        <p>Use the <strong>Info</strong> tab inside <code>Tools → Analog...</code> to inspect and adjust global C3D analog parameters.</p>
+        <figure>
+          <img src="images/05_analog_info_specs.png" alt="Analog Info Specifications Tab" />
+          <figcaption>Figure 5 — Analog Info tab displaying C3D scale, offset, rate, and units.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Parameter</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>SCALE</strong></td><td>Per-channel calibration multiplier read from the C3D file. Inverting its sign (e.g., <code>-1.0</code> to <code>1.0</code>) flips polarity across all analog channels.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>GEN_SCALE</strong></td><td>Global analog scale multiplier applied to all channels.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>OFFSET</strong></td><td>Baseline ADC zero offset.</td></tr>
+            <tr><td><span class="badge">4</span></td><td><strong>Combined Scale</strong></td><td>Live product <code>SCALE × GEN_SCALE</code>.</td></tr>
+            <tr><td><span class="badge">5</span></td><td><strong>Apply</strong></td><td>Updates metadata, rescales analog channels, and recalculates connected force platforms (with <strong>Reset to C3D Defaults</strong> and Undo/Redo support).</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="markers">
+        <h2>6. Marker Analysis &amp; Kinematics Tools</h2>
+        <p>Available under <code>Tools → Marker</code> or by right-clicking selected markers in the 3D Viewport / Data Explorer:</p>
+        <ul class="compact">
+          <li><strong>Create Average Marker</strong> (2 markers) &amp; <strong>Create Centroid Marker</strong> (3+ markers)</li>
+          <li><strong>Hip Joint Center (Harrington 2006)</strong> (4 pelvis markers: <code>LASIS</code>, <code>RASIS</code>, <code>LPSIS</code>, <code>RPSIS</code>)</li>
+          <li><strong>Measure Distance</strong> (2 markers) &amp; <strong>Measure Angle</strong> (3 markers) with ROI statistics and 2D plotting</li>
+          <li><strong>Filter Markers</strong> (zero-phase 4th-order Butterworth low-pass) &amp; <strong>Batch Color / Rename</strong></li>
+        </ul>
+        <figure>
+          <img src="images/06_marker_hjc_tools.png" alt="Hip Joint Center Dialog" />
+          <figcaption>Figure 6 — Hip Joint Center (Harrington 2006) dialog with auto-matched pelvis landmarks.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Pelvis Landmarks</strong></td><td>Automatically matches <code>LASIS</code>, <code>RASIS</code>, <code>LPSIS</code>, and <code>RPSIS</code> (editable via dropdowns).</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Output Marker Names</strong></td><td>Customize names for the computed Left and Right Hip Joint Centers (<code>LHJC</code>, <code>RHJC</code>).</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Calculate &amp; Add</strong></td><td>Computes both 3D trajectories across all frames and adds them to the trial.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="events">
+        <h2>7. Event Management &amp; Timeline ROI</h2>
+        <p>Open via <code>Tools → Events...</code>, press <kbd>Ctrl+E</kbd> / <kbd>Cmd+E</kbd> to insert an event at the current frame, or right-click the timeline.</p>
+        <figure>
+          <img src="images/07_event_manager.png" alt="Event Manager Dialog" />
+          <figcaption>Figure 7 — Event Manager dialog with Right/Left/General context support.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Events Table</strong></td><td>Displays Event name, Time (s), Frame, Context (<code>Right</code>, <code>Left</code>, <code>General</code>), and Description.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Add Event...</strong></td><td>Insert a new event at the active frame or a custom timestamp.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Edit / Delete Events</strong></td><td>Modify or remove existing events; all edits are saved into exported C3D files.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="opensim">
+        <h2>8. Export for OpenSim (.trc, .mot, .xml)</h2>
+        <p>Open via <code>File → Export → Export for OpenSim (.trc, .mot, .xml)...</code> to export marker trajectories (<code>.trc</code>), ground reaction forces (<code>_grf.mot</code>), and <code>ExternalLoads</code> XML configurations (<code>_grf.xml</code>) for single trials or batch folders.</p>
+        <figure>
+          <img src="images/08_opensim_export.png" alt="OpenSim Export Dialog" />
+          <figcaption>Figure 8 — OpenSim Export window showing Coordinate Mapping, ExternalForces table, and Batch Conditional Rules.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Coordinate Mapping</strong></td><td>Transform lab coordinates (e.g., <em>Lab Z-Up, X-Forward</em>) to OpenSim Y-Up (<code>+X</code> forward, <code>+Y</code> up, <code>+Z</code> right), or specify custom axes. Applies to markers, forces, COP, and free moments.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>ExternalForces Table</strong></td><td>Assign <code>Applied To Body</code> (e.g., <code>calcn_r</code>, <code>calcn_l</code>), toggle <code>Disabled</code> with the pill switch, or load an existing template XML via <strong>Load Template XML...</strong>.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Conditional Filename Rules</strong></td><td>In <strong>Batch Processing</strong>, match filename substrings (e.g., <code>_L_</code>, <code>_R_</code>, <code>static</code>) to automatically apply custom GRF / ExternalLoads settings per file. Click <strong>Set</strong> to save Section 2's configuration into a rule.</td></tr>
+            <tr><td><span class="badge">4</span></td><td><strong>Start Batch Export</strong></td><td>Exports <code>.trc</code>, <code>_grf.mot</code>, and <code>_grf.xml</code> for every queued C3D file in the background.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="batch">
+        <h2>9. Batch Processing Pipelines</h2>
+        <p>Open via <code>File → Batch Processing...</code> or <code>Tools → Batch Processing...</code> (<kbd>Ctrl+Shift+B</kbd> / <kbd>Cmd+Shift+B</kbd>) to run saved XML recipes or current operations across large collections of C3D files.</p>
+        <figure>
+          <img src="images/09_batch_processing.png" alt="Batch Processing Dialog" />
+          <figcaption>Figure 9 — Batch Processing dialog for multi-file signal &amp; marker pipelines.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Pipeline Operations</strong></td><td>Load an XML pipeline recipe or add operations (marker filtering, EMG custom filtering, virtual markers).</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>C3D File Queue</strong></td><td>Drag and drop C3D files/folders, automatically match external CSV/TXT/XLSX files, and track status badges.</td></tr>
+            <tr><td><span class="badge">3</span></td><td><strong>Start Batch Processing</strong></td><td>Executes all operations asynchronously with a live progress bar and exportable processing log.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="settings">
+        <h2>10. Visual Settings &amp; Themes</h2>
+        <p>Open via <code>Settings...</code> (<kbd>Ctrl+,</kbd> / <kbd>Cmd+,</kbd>) to customize themes, coordinate orientation, 3D marker/GRF styling, and playback defaults.</p>
+        <figure>
+          <img src="images/10_settings_themes.png" alt="Settings Dialog" />
+          <figcaption>Figure 10 — Visual Configurations dialog in Clinical Light theme.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th style="width: 55px;">#</th><th style="width: 210px;">Control</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><span class="badge">1</span></td><td><strong>Settings Categories</strong></td><td>Switch between <strong>Display</strong>, <strong>Coordinate System</strong> (Z-Up / Y-Up), <strong>3D Visuals</strong>, and <strong>Playback</strong>.</td></tr>
+            <tr><td><span class="badge">2</span></td><td><strong>Display Theme Selector</strong></td><td>Choose from 6 themes: <strong>Biomech Dark</strong>, <strong>Clinical Light</strong>, <strong>Nordic Frost</strong>, <strong>Nordic Midnight</strong>, <strong>Graphite Slate</strong>, and <strong>Cyber Amber</strong>.</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="shortcuts">
+        <h2>11. Keyboard Shortcuts Reference</h2>
+        <table>
+          <thead><tr><th style="width: 220px;">Shortcut</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td><kbd>Ctrl+O</kbd> / <kbd>Cmd+O</kbd></td><td>Open C3D File</td></tr>
+            <tr><td><kbd>Ctrl+S</kbd> / <kbd>Cmd+S</kbd></td><td>Save C3D File</td></tr>
+            <tr><td><kbd>Ctrl+Z</kbd></td><td>Undo Last Operation</td></tr>
+            <tr><td><kbd>Ctrl+Y</kbd> / <kbd>Cmd+Shift+Z</kbd></td><td>Redo Last Operation</td></tr>
+            <tr><td><kbd>Space</kbd></td><td>Play / Pause Animation (constrained to active Trim ROI)</td></tr>
+            <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Step Backward / Forward 1 Frame</td></tr>
+            <tr><td><kbd>Ctrl+P</kbd> / <kbd>Cmd+P</kbd></td><td>Open Universal Signal &amp; Marker Plotter</td></tr>
+            <tr><td><kbd>Ctrl+E</kbd> / <kbd>Cmd+E</kbd></td><td>Add Event at Current Frame</td></tr>
+            <tr><td><kbd>Ctrl+Shift+B</kbd> / <kbd>Cmd+Shift+B</kbd></td><td>Open Batch Processing</td></tr>
+            <tr><td><kbd>Ctrl+,</kbd> / <kbd>Cmd+,</kbd></td><td>Open Visual Settings</td></tr>
+            <tr><td><kbd>Ctrl+Q</kbd> / <kbd>Cmd+Q</kbd></td><td>Quit Application</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

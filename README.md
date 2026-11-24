@@ -1,14 +1,16 @@
 # C3D Explorer — Biomechanics & Motion Capture Workstation
 
 [![Website](https://img.shields.io/badge/🌐%20Website-biomech--lab.pages.dev-007ACC.svg)](https://biomech-lab.pages.dev/)
-[![Release](https://img.shields.io/badge/Release-v1.0.2-success.svg)](https://github.com/Mikey6787/c3d-explorer/releases)
+[![Release](https://img.shields.io/badge/Release-v1.2-success.svg)](https://github.com/Mikey6787/c3d-explorer/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555555.svg)]()
 [![PySide6](https://img.shields.io/badge/GUI-Qt6%20%2F%20PySide6-41CD52.svg?logo=qt&logoColor=white)](https://wiki.qt.io/Qt_for_Python)
 [![Windows Build](https://github.com/Mikey6787/c3d-explorer/actions/workflows/build-windows.yml/badge.svg)](https://github.com/Mikey6787/c3d-explorer/actions/workflows/build-windows.yml)
 [![Buy Me a Coffee](https://img.shields.io/badge/☕%20Buy%20Me%20a%20Coffee-Donate%20€5-8D5B36.svg)](https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=mohamadreza.kharazi%40live.com&currency_code=EUR&amount=5.00&item_name=Buy+Me+a+Coffee+-+C3D+Explorer)
 
-**C3D Explorer** is a high-performance, open-source biomechanics and motion capture workstation designed for researchers, clinicians, and movement scientists. Built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **ezc3d**, it offers an intuitive, fast, and modern desktop environment for 3D marker animation, multi-channel analog & force plate signal inspection, event detection, marker trajectory filtering, and standard `.c3d` file manipulation without relying on heavy proprietary software.
+**C3D Explorer** is a high-performance, open-source biomechanics and motion capture workstation designed for researchers, clinicians, and movement scientists. Built with **Python 3**, **Qt6 / PySide6**, **PyQtGraph**, and **ezc3d**, it offers an intuitive, fast, and modern desktop environment for 3D marker animation, multi-channel analog & force plate signal inspection, event detection, marker trajectory filtering, OpenSim export, and standard `.c3d` file manipulation without relying on heavy proprietary software.
+
+> 📖 **Documentation:** Read the **[Full Visual User Guide (with Annotated Screenshots)](docs/USER_GUIDE.md)** or open [`docs/USER_MANUAL.html`](docs/USER_MANUAL.html) locally in any browser (print-ready to PDF).
 
 ---
 
@@ -135,8 +137,14 @@ Under **`Tools -> Batch Processing...`** or **`File -> Batch Processing...`** (`
   - **Per-Trial External Data Matching**: Automatically pairs each trial with its corresponding external CSV, Excel (`.xlsx`), or TXT file (e.g., `Trial name_Marker name.xlsx/txt or csv`) with fallback options and real-time pairing status.
   - **Asynchronous Execution**: Background worker thread keeps the UI smooth with a live progress bar, file-by-file log, status badges (✓ Done, ⚠ Warning, ✕ Failed), and instant "Open Output Folder" upon completion.
 
-### 11. Menus & File I/O
-- **File**: Open C3D (`Ctrl+O` / `Cmd+O`), Open Recent files list, Save (`Ctrl+S`), Save As, Export C3D, Export as STL, Export CSV (Markers / Analogs), Export Pipeline (XML), Batch Processing (`Ctrl+Shift+B`), Exit.
+### 11. Export for OpenSim (`.trc`, `_grf.mot`, `_grf.xml`)
+Under **`File -> Export -> Export for OpenSim (.trc, .mot, .xml)...`**:
+- **Marker & GRF Export**: Exports OpenSim-ready `.trc` marker trajectories, `_grf.mot` force/COP/free-moment storage files, and `_grf.xml` `ExternalLoads` configuration files (or load an existing XML template).
+- **Coordinate System Mapping**: Built-in presets (e.g., *Lab Z-Up, X-Forward -> OpenSim Y-Up*) and custom per-axis mapping applied uniformly to markers, forces, COP, and free moments.
+- **Conditional Batch Export**: Queue multiple `.c3d` files and define filename-matching rules (e.g. `_L_` -> `calcn_l`, `_R_` -> `calcn_r`, `static` -> skip GRF) to automate multi-trial OpenSim preparation.
+
+### 12. Menus & File I/O
+- **File**: Open C3D (`Ctrl+O` / `Cmd+O`), Open Recent files list, Save (`Ctrl+S`), Save As, Export C3D, Export as STL, Export CSV (Markers / Analogs), Export for OpenSim (`.trc`, `.mot`, `.xml`), Export Pipeline (XML), Batch Processing (`Ctrl+Shift+B`), Exit.
 - **Edit**: Undo (`Ctrl+Z`), Redo (`Ctrl+Y` / `Cmd+Shift+Z`), Export Summary Report.
 - **View**: Reset View, Top, Front, Side, Iso views, Theme selection (`View -> Theme`), show/hide markers, plates, axes, grid, GRF vectors, and Panels submenu (`Data Explorer`, `Plotter`).
 - **Settings**: Direct dialog for visual configurations (Display, Coordinate System, 3D Visuals, Playback).

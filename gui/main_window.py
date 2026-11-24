@@ -315,6 +315,11 @@ class MainWindow(QMainWindow):
         act_exp_csv_analogs.triggered.connect(self.export_analogs_csv_dialog)
         export_menu.addAction(act_exp_csv_analogs)
 
+        act_exp_opensim = QAction("Export for OpenSim (.trc, .mot, .xml)...", self)
+        act_exp_opensim.setStatusTip("Export marker trajectories (.trc), ground reaction forces (.mot), and ExternalLoads XML for OpenSim")
+        act_exp_opensim.triggered.connect(self.open_opensim_export_dialog)
+        export_menu.addAction(act_exp_opensim)
+
         export_menu.addSeparator()
 
         act_exp_pipeline = QAction("Export Pipeline (XML)...", self)
@@ -645,6 +650,8 @@ class MainWindow(QMainWindow):
     def _on_trim_range_changed(self, start_f: int, end_f: int):
         if not self.trial:
             return
+        if hasattr(self, 'playback'):
+            self.playback.set_play_range(start_f, end_f)
         is_trimmed = (start_f > 0 or end_f < self.trial.point_frame_count - 1)
         if is_trimmed:
             cnt = end_f - start_f + 1
@@ -1523,6 +1530,15 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "Export Complete", f"Analogs CSV exported successfully{trim_msg}:\n{path}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export CSV:\n{e}")
+
+    def open_opensim_export_dialog(self):
+        """Open the OpenSim Export dialog (.trc, _grf.mot, _grf.xml) for current trial or batch processing."""
+        from gui.opensim_export_dialog import OpenSimExportDialog
+        trim_rng = (self.timeline.trim_start_frame, self.timeline.trim_end_frame) if hasattr(self, "timeline") else None
+        dlg = OpenSimExportDialog(trial=self.trial, trim_range=trim_rng, parent=self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     def export_pipeline_dialog(self):
         """Export all settings, operations, and modifications to an XML pipeline file."""

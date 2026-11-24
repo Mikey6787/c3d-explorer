@@ -7,7 +7,7 @@ from core.grw_calculator import compute_ground_reaction_wrenches
 from core.pipeline_manager import PipelineManager, PipelineStep
 from core.pipeline_executor import PipelineExecutor, ExecutableOperation, TrialExecutionResult
 
-__version__ = "1.1"
+__version__ = "1.2"
 
 __all__ = [
     "__version__",
